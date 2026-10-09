@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, OptionalExtension};
 
 use super::Database;
-use crate::dictionary::{decode_cached, Entry, Source};
+use crate::dictionary::{decode_cached, Entry};
 use crate::learning::{Grade, PracticeMode, ScheduleState, Status};
 use crate::time::{from_db, to_db};
 
@@ -15,7 +15,10 @@ pub struct CachedWord {
     pub id: i64,
     pub headword: String,
     pub entry: Entry,
-    pub source: Source,
+    /// Dictionary the entry came from; anything other than
+    /// [`crate::dictionary::SOURCE`] is refreshed when used (older dictionaries and
+    /// [`crate::dictionary::PARTIAL_SOURCE`]).
+    pub source: String,
     pub fetched_at: DateTime<Utc>,
     pub in_collection: bool,
     pub note: Option<String>,
@@ -55,9 +58,15 @@ pub struct NewAttempt<'a> {
     pub duration_ms: Option<i64>,
 }
 
+/// Columns of `user_words`, shared with `archived_user_words`.
+const SCHEDULE_COLUMNS: &str = "word_id, status, personal_note, due_at, interval_days, \
+     repetitions, ease_factor, lapses, added_at, last_reviewed_at";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddOutcome {
     Added,
+    /// Re-added after a link removal, with the archived study progress.
+    Restored,
     AlreadySaved,
     NoteUpdated,
 }
@@ -160,13 +169,15 @@ impl StudyRow {
 }
 
 impl Database {
-    /// Inserts or refreshes a dictionary entry in the cache and returns its id.
+    /// Inserts or refreshes a Wiktionary entry in the cache and returns its id.
+    /// `source` is [`crate::dictionary::SOURCE`], or [`crate::dictionary::PARTIAL_SOURCE`]
+    /// when the pronunciation data is missing.
     pub fn cache_word(
         &self,
         headword: &str,
         entry: &Entry,
         raw_json: &str,
-        source: Source,
+        source: &str,
         now: DateTime<Utc>,
     ) -> Result<i64> {
         let entry_json = serde_json::to_string(entry)?;
@@ -189,12 +200,21 @@ impl Database {
                 raw_json,
                 entry.has_audio(),
                 to_db(now),
-                source.as_str(),
+                source,
                 entry_json
             ],
             |row| row.get(0),
         )?;
         Ok(id)
+    }
+
+    /// Changes the recorded dictionary source of a cached word.
+    pub fn set_source(&self, word_id: i64, source: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE words SET source = ?2 WHERE id = ?1",
+            params![word_id, source],
+        )?;
+        Ok(())
     }
 
     /// Remembers that looking up `alias` produced the cached word `word_id`.
@@ -263,9 +283,7 @@ impl Database {
                     id,
                     headword,
                     entry: parse_entry(&display, &raw, entry_json.as_deref())?,
-                    source: Source::parse(&source).with_context(|| {
-                        format!("unknown dictionary source \"{source}\" in database")
-                    })?,
+                    source,
                     fetched_at: from_db(&fetched)?,
                     in_collection,
                     note,
@@ -276,7 +294,8 @@ impl Database {
     }
 
     /// Adds a cached word to the study list. Saving the same word twice is a no-op
-    /// (apart from updating the note when one is supplied).
+    /// (apart from updating the note when one is supplied). A word removed with
+    /// [`Database::archive_from_collection`] comes back with its study progress.
     pub fn add_to_collection(
         &self,
         word_id: i64,
@@ -284,25 +303,63 @@ impl Database {
         now: DateTime<Utc>,
     ) -> Result<AddOutcome> {
         let note = note.map(str::trim).filter(|n| !n.is_empty());
-        let inserted = self.conn.execute(
-            "INSERT INTO user_words (word_id, status, personal_note, due_at, added_at)
-             VALUES (?1, 'new', ?2, ?3, ?3)
-             ON CONFLICT (word_id) DO NOTHING",
-            params![word_id, note, to_db(now)],
+        let tx = self.conn.unchecked_transaction()?;
+        let restored = tx.execute(
+            &format!(
+                "INSERT INTO user_words ({SCHEDULE_COLUMNS})
+                 SELECT {SCHEDULE_COLUMNS} FROM archived_user_words WHERE word_id = ?1
+                 ON CONFLICT (word_id) DO NOTHING"
+            ),
+            [word_id],
         )?;
-        if inserted == 1 {
-            return Ok(AddOutcome::Added);
-        }
-        match note {
-            Some(note) => {
-                self.conn.execute(
-                    "UPDATE user_words SET personal_note = ?2 WHERE word_id = ?1",
-                    params![word_id, note],
-                )?;
-                Ok(AddOutcome::NoteUpdated)
+        tx.execute(
+            "DELETE FROM archived_user_words WHERE word_id = ?1",
+            [word_id],
+        )?;
+        let outcome = if restored == 1 {
+            AddOutcome::Restored
+        } else {
+            let inserted = tx.execute(
+                "INSERT INTO user_words (word_id, status, personal_note, due_at, added_at)
+                 VALUES (?1, 'new', ?2, ?3, ?3)
+                 ON CONFLICT (word_id) DO NOTHING",
+                params![word_id, note, to_db(now)],
+            )?;
+            match (inserted, note) {
+                (1, _) => AddOutcome::Added,
+                (_, Some(_)) => AddOutcome::NoteUpdated,
+                (_, None) => AddOutcome::AlreadySaved,
             }
-            None => Ok(AddOutcome::AlreadySaved),
+        };
+        if let (AddOutcome::Restored | AddOutcome::NoteUpdated, Some(note)) = (outcome, note) {
+            tx.execute(
+                "UPDATE user_words SET personal_note = ?2 WHERE word_id = ?1",
+                params![word_id, note],
+            )?;
         }
+        tx.commit()?;
+        Ok(outcome)
+    }
+
+    /// Removes a word from the study list but keeps its study progress, so
+    /// adding it again restores it. Used for removals triggered by links,
+    /// which other programs could also open. Returns false if the word was
+    /// not saved.
+    pub fn archive_from_collection(&self, headword: &str, now: DateTime<Utc>) -> Result<bool> {
+        let Some(word_id) = self.resolve_word_id(headword)? else {
+            return Ok(false);
+        };
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            &format!(
+                "INSERT OR REPLACE INTO archived_user_words ({SCHEDULE_COLUMNS}, archived_at)
+                 SELECT {SCHEDULE_COLUMNS}, ?2 FROM user_words WHERE word_id = ?1"
+            ),
+            params![word_id, to_db(now)],
+        )?;
+        let removed = tx.execute("DELETE FROM user_words WHERE word_id = ?1", [word_id])?;
+        tx.commit()?;
+        Ok(removed > 0)
     }
 
     /// Removes a word from the study list. The dictionary cache and answer

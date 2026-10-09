@@ -4,10 +4,10 @@ A terminal-first language learning tool for stealthy study sessions.
 
 StealthLingo is a small Rust CLI for vocabulary practice in spare minutes: look a
 word up, save it, and run 3–5 minute sessions of flashcards, spelling or
-listening-spelling. Dictionary data comes from a source you choose
-([Wiktionary](https://en.wiktionary.org/) by default, the
-[Free Dictionary API](https://dictionaryapi.dev/) or [Merriam-Webster](https://dictionaryapi.com/)); scheduling, answer checking and
-your progress live in a local SQLite database, so saved words can be reviewed offline.
+listening-spelling. Dictionary data comes from English
+[Wiktionary](https://en.wiktionary.org/) through Wikimedia's official API, no key
+needed; scheduling, answer checking and your progress live in a local SQLite
+database, so saved words can be reviewed offline.
 
 English is the only supported language in v0.1.
 
@@ -27,7 +27,7 @@ at build time.
 ## Quick start
 
 ```bash
-stealthlingo lookup ephemeral          # show definitions, phonetics, examples
+stealthlingo lookup ephemeral          # pronunciation and the main definitions (--all for everything)
 stealthlingo add ephemeral --note 短暂的 # save it, with an optional personal note
 stealthlingo                           # today's practice: due reviews first, else new words
 ```
@@ -37,7 +37,7 @@ stealthlingo                           # today's practice: due reviews first, el
 | Command | What it does |
 |---|---|
 | `stealthlingo` | Review due words; if nothing is due, study new ones; with an empty list, explain how to start |
-| `lookup <WORD>` | Query the API (refreshes the cache; falls back to the cached copy when offline) |
+| `lookup <WORD> [--all]` | Query Wiktionary (refreshes the cache; falls back to the cached copy when offline) |
 | `add <WORD> [--note TEXT]` | Save a word. Saving twice is harmless; `--note` updates the note |
 | `remove <WORD>` | Remove a word from your list (cached dictionary data and history are kept) |
 | `words` | List saved words with status and due time |
@@ -47,13 +47,38 @@ stealthlingo                           # today's practice: due reviews first, el
 | `stats` | Saved words, due count, today's answers and accuracy |
 | `audio <WORD>` | Play the pronunciation |
 | `config` / `config set <KEY> <VALUE>` | Show or change settings and data locations |
+| `links [status\|install\|uninstall]` | Ctrl+click in `lookup` to play pronunciations and add or remove words (Windows) |
 | `export <PATH>` / `import <PATH>` | `.json` full backup, or `.csv` word list |
 
 Without `--minutes` or `--count`, a session lasts `default_minutes` (5).
-Commands that look words up (`lookup`, `add`, `audio`, `import`, and sessions) also
-accept `--source <wiktionary|free-dictionary|merriam-webster>` to use another
-dictionary just this once. A cached word that came from a different source is
-fetched again from the one you asked for.
+
+`lookup` shows pronunciations on one line, UK first, then US
+(`Pronunciation: UK /njuː/ · US /nu/`), and names the accent of the recording
+that `audio` plays. By default it then lists the first three definitions of up
+to three parts of speech. `lookup --all` (or `-a`)
+shows every definition with examples, synonyms, antonyms and the source.
+Definitions wrap to the terminal width with their continuation lines indented.
+
+### Clickable lookups (Windows)
+
+```bash
+stealthlingo links install   # once, after the first `cargo install`
+```
+
+This registers a `stealthlingo://` link handler for your user (no admin rights
+needed). `lookup` then turns each pronunciation that has a recording into a
+terminal hyperlink: Ctrl+click it and the recording plays in the background,
+without opening a browser or a window. The last line becomes
+`+ Add to word list`, or `Saved in your word list · Remove` for saved words;
+Ctrl+click it to add or remove the word without typing a command (run `lookup`
+again to see the change). Because other programs can open these links too, a
+removal by link keeps the word's study progress: adding the word again, by link
+or with `add`, restores it. The `remove` command starts the word over instead. It works in terminals that render hyperlinks (Windows
+Terminal, VS Code / Cursor); elsewhere `lookup` prints plain text with the
+`add` and `audio` commands. `links status` shows what was detected,
+`FORCE_HYPERLINK=1` (or `0`) overrides the detection, and `links uninstall`
+removes the handler. Errors are written to `link-errors.log` in the data
+directory.
 
 ### Study modes
 
@@ -93,31 +118,20 @@ more are shown as `mastered`.
 stealthlingo config set daily_new_limit 15
 stealthlingo config set default_minutes 3
 stealthlingo config set http_timeout_secs 10
-stealthlingo config set dictionary_source merriam-webster
-stealthlingo config set merriam_webster_key <KEY>
-stealthlingo config set free_dictionary_url https://api.dictionaryapi.dev/api/v2/entries/en
 ```
 
-### Dictionary sources
+### Dictionary
 
-| Source | Key | Notes |
-|---|---|---|
-| `wiktionary` (default) | none | Wikimedia's official API: definitions and examples, plus IPA, synonyms, antonyms and Wikimedia Commons recordings (OGG) from the page source. |
-| `free-dictionary` | none | Community-run, derived from Wiktionary; MP3 audio for many words. Has no SLA and is sometimes down. |
-| `merriam-webster` | free key | Collegiate Dictionary: concise definitions, MW-style pronunciation (`\i-ˈfem-rəl\`) and MP3 audio. Register at [dictionaryapi.com](https://dictionaryapi.com/register/index) and request the *Collegiate Dictionary* API. |
+StealthLingo uses Wikimedia's official Wiktionary API: definitions and examples
+come from the REST API, and IPA (labelled by accent), synonyms, antonyms and
+Wikimedia Commons recordings (OGG) from the page source. When the typed form and
+the dictionary headword differ (`Ephemeral` and `ephemeral`), the typed form is
+remembered, so `add` and `remove` refer to the same saved word.
 
-Switch for good with `config set dictionary_source <SOURCE>`, or for a single command:
-
-```bash
-stealthlingo lookup hostel --source free-dictionary
-```
-
-Each cached word remembers which source it came from (`lookup` shows it). Looking
-a word up again with another source replaces the cached entry; your study progress
-and notes are kept. When a dictionary answers with a different headword (Merriam-Webster
-maps `ran` to `run`), the typed form is remembered, so `add ran` and `remove ran`
-refer to the same saved word. `config` masks the Merriam-Webster key when printing
-it, and it is never included in error messages.
+Older versions could also use the Free Dictionary API or Merriam-Webster. Words
+cached from those are still readable offline, and are replaced with Wiktionary
+data the next time they are looked up (study progress and notes are kept). Their
+old settings in `config.json` are ignored.
 
 ## Data directory
 
@@ -149,25 +163,21 @@ it needs a connection.
 ## Offline behavior
 
 - Studying, reviewing, `words`, `search` and `stats` never touch the network.
-- `lookup` refreshes from the dictionary, and shows the cached copy if it is unreachable.
-  When a word is not cached and the dictionary is down, the error suggests trying
-  another source.
+- `lookup` refreshes from Wiktionary, and shows the cached copy if it is unreachable.
 - `add` and `audio` use the cache when possible and only go online for new words.
 - Pronunciation audio is downloaded the first time it is played and reused after that.
 
 ## About the dictionary data
 
-- Entries carry their source URL and license, which `lookup` shows. Free Dictionary
-  and Wiktionary content is CC BY-SA (3.0 or 4.0); Merriam-Webster content is
-  subject to its [API terms](https://dictionaryapi.com/info/terms-of-service)
-  (free for non-commercial use, with request limits).
+- Entries carry their source URL and license, which `lookup --all` shows. Wiktionary
+  content is licensed CC BY-SA 4.0.
 - Coverage varies by word: phonetics, audio, examples, synonyms and antonyms can all
   be missing. StealthLingo handles every field as optional; words without audio
   are skipped in listening practice.
-- None of the sources is a translation service. Chinese (or any other language)
+- Wiktionary is not a translation service. Chinese (or any other language)
   hints come from your own `--note`, never from the dictionary.
-- The services are free and can be slow or down. Respect their usage terms, and do
-  not redistribute cached data in bulk without honoring the original licenses.
+- The service is free and can be slow or down. Respect Wikimedia's usage terms, and
+  do not redistribute cached data in bulk without honoring the license.
 
 ## Development
 
@@ -177,8 +187,8 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-The code is split into `dictionary` (one module per source, all mapped to a shared
-`Entry` model), `storage` (SQLite),
+The code is split into `dictionary` (Wiktionary client and parsers mapped to an
+`Entry` model, plus a decoder for data cached by v0.1), `storage` (SQLite),
 `learning` (scheduling, answer checking, sessions), `audio` and `commands`.
 Scheduling is a pure function with its own tests in `tests/scheduling_tests.rs`.
 

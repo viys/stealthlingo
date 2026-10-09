@@ -120,7 +120,7 @@ fn import_csv(ctx: &Context, path: &Path) -> Result<()> {
         let result = cached_or_fetch(ctx, word)
             .and_then(|(cached, _)| ctx.db.add_to_collection(cached.id, note, Utc::now()));
         match result {
-            Ok(AddOutcome::Added) => {
+            Ok(AddOutcome::Added | AddOutcome::Restored) => {
                 println!("  + {word}");
                 added += 1;
             }

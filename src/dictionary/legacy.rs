@@ -1,10 +1,12 @@
-//! Free Dictionary API (<https://dictionaryapi.dev/>). Every remote field is
-//! optional: coverage varies a lot between words.
+//! Decodes data cached by v0.1, which stored raw Free Dictionary API
+//! (<https://dictionaryapi.dev/>) responses. Only used for old database rows
+//! and version 1 backups; nothing is fetched from that service any more.
 
 use serde::Deserialize;
 
 use super::models::{
-    non_blank, normalize_audio_url, push_unique, Definition, Entry, Meaning, Phonetic,
+    accent_from_audio_url, non_blank, normalize_audio_url, push_unique, Definition, Entry, Meaning,
+    Phonetic,
 };
 use crate::error::DictionaryError;
 
@@ -52,28 +54,7 @@ struct ApiLicense {
     name: Option<String>,
 }
 
-/// Body returned with HTTP 404, e.g. `{"title": "No Definitions Found", ...}`.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
-struct ApiErrorBody {
-    #[allow(dead_code)]
-    title: Option<String>,
-}
-
-/// Maps an HTTP status and body to an entry or a classified error.
-pub fn interpret(word: &str, status: u16, body: &str) -> Result<Entry, DictionaryError> {
-    match status {
-        200..=299 => parse(word, body),
-        // The API answers 404 with a JSON explanation; anything else is unexpected.
-        404 => match serde_json::from_str::<ApiErrorBody>(body) {
-            Ok(_) => Err(DictionaryError::NotFound(word.trim().to_string())),
-            Err(_) => Err(DictionaryError::Server(404)),
-        },
-        other => Err(DictionaryError::Server(other)),
-    }
-}
-
-/// Parses a successful response body. The API returns one array element per
+/// Parses a stored response body. The API returned one array element per
 /// etymology/homograph; they are merged into a single entry.
 pub fn parse(requested_word: &str, body: &str) -> Result<Entry, DictionaryError> {
     let api_entries: Vec<ApiEntry> =
@@ -96,9 +77,15 @@ pub fn parse(requested_word: &str, body: &str) -> Result<Entry, DictionaryError>
             entry.phonetic = non_blank(api.phonetic);
         }
         for p in api.phonetics {
+            let audio_url = p.audio.as_deref().and_then(normalize_audio_url);
+            let accent = audio_url
+                .as_deref()
+                .and_then(accent_from_audio_url)
+                .map(str::to_string);
             entry.push_phonetic(Phonetic {
                 text: non_blank(p.text),
-                audio_url: p.audio.as_deref().and_then(normalize_audio_url),
+                audio_url,
+                accent,
             });
         }
         for m in api.meanings {

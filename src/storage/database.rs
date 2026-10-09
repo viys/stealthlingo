@@ -8,6 +8,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/001_initial.sql"),
     include_str!("../../migrations/002_dictionary_sources.sql"),
     include_str!("../../migrations/003_word_aliases.sql"),
+    include_str!("../../migrations/004_archived_words.sql"),
 ];
 
 pub struct Database {

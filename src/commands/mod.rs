@@ -2,6 +2,7 @@ pub mod add;
 pub mod audio;
 pub mod config;
 pub mod io;
+pub mod links;
 pub mod lookup;
 pub mod review;
 pub mod stats;
@@ -14,9 +15,9 @@ use anyhow::{anyhow, bail, Result};
 use chrono::Utc;
 
 use crate::audio::AudioPlayer;
-use crate::cli::{Cli, Command, StudyArgs};
+use crate::cli::{Cli, Command, LinksAction, StudyArgs};
 use crate::config::{Config, Paths};
-use crate::dictionary::{normalize_headword, DictionaryClient, Source, SourceSettings};
+use crate::dictionary::{self, normalize_headword, DictionaryClient, Endpoints};
 use crate::error::DictionaryError;
 use crate::storage::{CachedWord, Database};
 
@@ -25,8 +26,7 @@ pub struct Context {
     pub paths: Paths,
     pub config: Config,
     pub db: Database,
-    /// `--source` given on the command line for this run only.
-    pub source_override: Option<Source>,
+    pub endpoints: Endpoints,
 }
 
 impl Context {
@@ -42,7 +42,7 @@ impl Context {
             paths,
             config,
             db,
-            source_override: None,
+            endpoints: Endpoints::default(),
         })
     }
 
@@ -50,19 +50,11 @@ impl Context {
         Duration::from_secs(self.config.http_timeout_secs.max(1))
     }
 
-    /// The dictionary used for lookups in this run.
-    pub fn source(&self) -> Source {
-        self.source_override
-            .unwrap_or(self.config.dictionary_source)
-    }
-
     pub fn dictionary(&self) -> Result<DictionaryClient> {
-        let settings = SourceSettings {
-            source: self.source(),
-            free_dictionary_url: self.config.free_dictionary_url.clone(),
-            merriam_webster_key: self.config.merriam_webster_key.clone(),
-        };
-        Ok(DictionaryClient::new(settings, self.timeout())?)
+        Ok(DictionaryClient::new(
+            self.endpoints.clone(),
+            self.timeout(),
+        )?)
     }
 
     pub fn audio_player(&self) -> Result<AudioPlayer> {
@@ -72,14 +64,17 @@ impl Context {
 
 pub fn run(cli: Cli) -> Result<()> {
     crate::learning::session::install_interrupt_handler();
-    if cli.source.is_some() && matches!(cli.command, Some(Command::Config { .. })) {
-        bail!("--source only applies to lookups; use `stealthlingo config set dictionary_source <SOURCE>` to change the default");
-    }
     let mut ctx = Context::load()?;
-    ctx.source_override = cli.source;
     match cli.command {
         None => default_entry(&mut ctx),
-        Some(Command::Lookup { word }) => lookup::run(&ctx, &word),
+        Some(Command::Lookup { word, all }) => {
+            let detail = if all {
+                lookup::Detail::Full
+            } else {
+                lookup::Detail::Brief
+            };
+            lookup::run(&ctx, &word, detail)
+        }
         Some(Command::Add { word, note }) => add::run(&ctx, &word, note.as_deref()),
         Some(Command::Remove { word }) => words::remove(&ctx, &word),
         Some(Command::Words) => words::list(&ctx, None),
@@ -89,6 +84,12 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Command::Stats) => stats::run(&ctx),
         Some(Command::Audio { word }) => audio::run(&ctx, &word),
         Some(Command::Config { action }) => config::run(&mut ctx, action),
+        Some(Command::Links { action }) => match action.unwrap_or(LinksAction::Status) {
+            LinksAction::Status => links::status(),
+            LinksAction::Install => links::install(),
+            LinksAction::Uninstall => links::uninstall(),
+            LinksAction::Open { link } => links::open(&ctx, &link),
+        },
         Some(Command::Export { path }) => io::export(&ctx, &path),
         Some(Command::Import { path }) => io::import(&mut ctx, &path),
     }
@@ -130,20 +131,11 @@ pub enum Freshness {
     Fallback(DictionaryError),
 }
 
-fn offline_error(word: &str, source: Source, err: DictionaryError) -> anyhow::Error {
+fn offline_error(word: &str, err: DictionaryError) -> anyhow::Error {
     if err.is_service_side() {
-        let alternatives: Vec<&str> = Source::ALL
-            .into_iter()
-            .filter(|s| *s != source)
-            .map(Source::as_str)
-            .collect();
         anyhow!(
-            "{err}\n\"{word}\" is not in your local cache yet, so {} cannot look it up right now.\n\
-             Try another dictionary: `stealthlingo lookup {word} --source {}`, or switch for good with\n\
-             `stealthlingo config set dictionary_source <{}>`. Words you have already saved work offline.",
-            source.label(),
-            alternatives[0],
-            alternatives.join("|")
+            "{err}\n\"{word}\" is not in your local cache yet, so Wiktionary cannot look it up right now; \
+             try again in a few minutes. Words you have already saved work offline."
         )
     } else if err.is_transient() {
         anyhow!("{err}\n\"{word}\" is not in your local cache yet, so looking it up needs a working connection.")
@@ -152,23 +144,33 @@ fn offline_error(word: &str, source: Source, err: DictionaryError) -> anyhow::Er
     }
 }
 
-/// Queries the API and refreshes the cache, falling back to cached data when
-/// the service is unreachable.
+/// Queries Wiktionary and refreshes the cache, falling back to cached data
+/// when the service is unreachable.
 pub fn fetch_word(ctx: &Context, word: &str) -> Result<(CachedWord, Freshness)> {
     let headword = require_word(word)?;
-    let source = ctx.source();
     match ctx.dictionary()?.fetch(word) {
         Ok(fetched) => {
             let key = Some(normalize_headword(&fetched.entry.word))
                 .filter(|k| !k.is_empty())
                 .unwrap_or_else(|| headword.clone());
-            let id = ctx.db.cache_word(
-                &key,
-                &fetched.entry,
-                &fetched.raw_json,
-                fetched.source,
-                Utc::now(),
-            )?;
+            let source = if fetched.complete {
+                dictionary::SOURCE
+            } else {
+                // Keep a complete copy rather than replace it with one that
+                // lacks pronunciations and audio.
+                if let Some(cached) = ctx
+                    .db
+                    .find_cached(&key)?
+                    .filter(|c| c.source == dictionary::SOURCE)
+                {
+                    ctx.db.add_alias(&headword, cached.id)?;
+                    return Ok((cached, Freshness::Cached));
+                }
+                dictionary::PARTIAL_SOURCE
+            };
+            let id =
+                ctx.db
+                    .cache_word(&key, &fetched.entry, &fetched.raw_json, source, Utc::now())?;
             // The dictionary may answer with another headword ("ran" -> "run").
             ctx.db.add_alias(&headword, id)?;
             let cached = ctx
@@ -179,20 +181,32 @@ pub fn fetch_word(ctx: &Context, word: &str) -> Result<(CachedWord, Freshness)> 
         }
         Err(err) if err.is_transient() => match ctx.db.find_cached(&headword)? {
             Some(cached) => Ok((cached, Freshness::Fallback(err))),
-            None => Err(offline_error(word.trim(), source, err)),
+            None => Err(offline_error(word.trim(), err)),
         },
         Err(err) => Err(err.into()),
     }
 }
 
 /// Returns cached data when available and only goes to the network otherwise.
-/// An explicit `--source` that differs from the cached copy forces a refresh.
+/// Entries from a dictionary used by older versions, or cached without their
+/// pronunciation data, are refreshed from Wiktionary; the old copy is kept if
+/// that fails. When Wiktionary does not have the word at all, the old copy is
+/// marked as current so it is not looked up again every time.
 pub fn cached_or_fetch(ctx: &Context, word: &str) -> Result<(CachedWord, Freshness)> {
     let headword = require_word(word)?;
     if let Some(cached) = ctx.db.find_cached(&headword)? {
-        if ctx.source_override.is_none_or(|s| s == cached.source) {
+        if cached.source == dictionary::SOURCE {
             return Ok((cached, Freshness::Cached));
         }
+        return match fetch_word(ctx, word) {
+            Ok(fresh) => Ok(fresh),
+            Err(err) => {
+                if let Some(DictionaryError::NotFound(_)) = err.downcast_ref() {
+                    ctx.db.set_source(cached.id, dictionary::SOURCE)?;
+                }
+                Ok((cached, Freshness::Cached))
+            }
+        };
     }
     fetch_word(ctx, word)
 }

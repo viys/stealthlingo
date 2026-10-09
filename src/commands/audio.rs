@@ -11,8 +11,13 @@ pub fn run(ctx: &Context, word: &str) -> Result<()> {
             cached.entry.word
         );
     };
-    let label = cached.entry.phonetic.as_deref().unwrap_or("");
-    println!("Playing \"{}\" {label}", cached.entry.word);
+    let accent = cached
+        .entry
+        .audio()
+        .and_then(|p| p.accent.as_deref())
+        .map(|a| format!(" ({a} recording)"))
+        .unwrap_or_default();
+    println!("Playing \"{}\"{accent}", cached.entry.word);
     ctx.audio_player()?
         .play(&normalize_headword(&cached.entry.word), url)
 }

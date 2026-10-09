@@ -8,7 +8,9 @@ use reqwest::Url;
 use serde::Deserialize;
 
 use super::markup::html_to_text;
-use super::models::{push_unique, Definition, Entry, Meaning, Phonetic};
+use super::models::{
+    accent_from_audio_url, accent_name, push_unique, Definition, Entry, Meaning, Phonetic,
+};
 use crate::error::DictionaryError;
 
 pub const REST_BASE: &str = "https://en.wiktionary.org/api/rest_v1/page/definition";
@@ -53,9 +55,10 @@ pub fn page_url(word: &str) -> String {
     url.to_string()
 }
 
-pub fn wikitext_url(word: &str) -> Url {
+/// `action=parse` request for the page wikitext, sent to `action_api`.
+pub fn wikitext_url(action_api: &str, word: &str) -> Result<Url, DictionaryError> {
     Url::parse_with_params(
-        ACTION_API,
+        action_api,
         &[
             ("action", "parse"),
             ("page", &page_title(word)),
@@ -65,7 +68,7 @@ pub fn wikitext_url(word: &str) -> Url {
             ("redirects", "1"),
         ],
     )
-    .expect("static URL")
+    .map_err(|e| DictionaryError::Config(format!("invalid dictionary URL {action_api}: {e}")))
 }
 
 pub fn commons_audio_url(file: &str) -> String {
@@ -153,8 +156,10 @@ pub fn extract_wikitext(body: &str) -> Option<String> {
 /// Pronunciation and related-word data found in the English section.
 #[derive(Debug, Default, PartialEq)]
 pub struct PageExtras {
-    pub ipa: Vec<String>,
-    pub audio_files: Vec<String>,
+    /// IPA transcriptions with the accent they are labelled with.
+    pub ipa: Vec<(String, Option<String>)>,
+    /// Commons audio file names with the accent they are labelled with.
+    pub audio_files: Vec<(String, Option<String>)>,
     /// Synonyms and antonyms keyed by lowercase part of speech.
     pub synonyms: Vec<(String, Vec<String>)>,
     pub antonyms: Vec<(String, Vec<String>)>,
@@ -222,6 +227,44 @@ fn positional<'a>(args: &[&'a str]) -> Vec<&'a str> {
         .collect()
 }
 
+/// Value of a `key=value` template argument.
+fn named<'a>(args: &[&'a str], key: &str) -> Option<&'a str> {
+    args.iter().find_map(|a| {
+        let (k, v) = a.split_once('=')?;
+        (k.trim() == key).then_some(v.trim())
+    })
+}
+
+/// Known accents among `labels`, deduplicated, in order.
+fn accents<'a>(labels: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    for name in labels
+        .into_iter()
+        .flat_map(|l| l.split(','))
+        .filter_map(accent_name)
+    {
+        if !found.iter().any(|f| f == name) {
+            found.push(name.to_string());
+        }
+    }
+    found
+}
+
+/// Adds `value` once per accent (or once unlabelled when `accents` is empty).
+fn push_accented(target: &mut Vec<(String, Option<String>)>, value: &str, accents: &[String]) {
+    let labels: Vec<Option<String>> = if accents.is_empty() {
+        vec![None]
+    } else {
+        accents.iter().cloned().map(Some).collect()
+    };
+    for accent in labels {
+        let item = (value.to_string(), accent);
+        if !target.contains(&item) {
+            target.push(item);
+        }
+    }
+}
+
 fn related_words(args: &[&str]) -> Vec<String> {
     positional(args)
         .into_iter()
@@ -248,6 +291,9 @@ pub fn parse_wikitext(wikitext: &str) -> PageExtras {
         return extras;
     };
     let mut current_pos = String::new();
+    // Accents of the last top-level `*` bullet; `**` sub-bullets (usually the
+    // recording of the transcription above) inherit them.
+    let mut parent_accents: Vec<String> = Vec::new();
     for line in section.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("===") {
@@ -257,20 +303,49 @@ pub fn parse_wikitext(wikitext: &str) -> PageExtras {
             }
             continue;
         }
+        let depth = trimmed.chars().take_while(|c| *c == '*').count();
+        let mut line_accents = accents(templates(line, &["a", "accent"]).into_iter().flatten());
+        if line_accents.is_empty() && depth > 1 {
+            line_accents = parent_accents.clone();
+        }
+        let mut accents_on_line = line_accents.clone();
         for args in templates(line, &["IPA"]) {
-            if args.first().map(|l| l.trim()) == Some("en") {
-                push_unique(
-                    &mut extras.ipa,
-                    positional(&args).into_iter().map(str::to_string),
-                );
+            if args.first().map(|l| l.trim()) != Some("en") {
+                continue;
             }
+            let mut ipa_accents = accents(named(&args, "a"));
+            if ipa_accents.is_empty() {
+                ipa_accents = line_accents.clone();
+            }
+            for ipa in positional(&args) {
+                push_accented(&mut extras.ipa, ipa, &ipa_accents);
+            }
+            accents_on_line.extend(ipa_accents);
         }
         for args in templates(line, &["audio"]) {
-            if args.first().map(|l| l.trim()) == Some("en") {
-                if let Some(file) = args.get(1).map(|f| f.trim()).filter(|f| !f.is_empty()) {
-                    push_unique(&mut extras.audio_files, [file.to_string()]);
-                }
+            if args.first().map(|l| l.trim()) != Some("en") {
+                continue;
             }
+            let Some(file) = args.get(1).map(|f| f.trim()).filter(|f| !f.is_empty()) else {
+                continue;
+            };
+            let mut audio_accents = accents(named(&args, "a"));
+            if audio_accents.is_empty() {
+                audio_accents = line_accents.clone();
+            }
+            if audio_accents.is_empty() {
+                audio_accents = accent_from_audio_url(file)
+                    .map(|a| vec![a.to_string()])
+                    .unwrap_or_default();
+            }
+            // One recording is enough; the first accent is a fine label for it.
+            audio_accents.truncate(1);
+            if !extras.audio_files.iter().any(|(f, _)| f == file) {
+                push_accented(&mut extras.audio_files, file, &audio_accents);
+            }
+        }
+        if depth == 1 {
+            parent_accents = accents_on_line;
         }
         if current_pos.is_empty() {
             continue;
@@ -289,20 +364,22 @@ pub fn parse_wikitext(wikitext: &str) -> PageExtras {
 pub fn apply_extras(entry: &mut Entry, extras: PageExtras) {
     // Wiktionary does not tie recordings to a specific transcription, so they
     // are kept as separate phonetics.
-    for ipa in &extras.ipa {
+    for (ipa, accent) in &extras.ipa {
         entry.push_phonetic(Phonetic {
             text: Some(ipa.clone()),
             audio_url: None,
+            accent: accent.clone(),
         });
     }
-    for file in &extras.audio_files {
+    for (file, accent) in &extras.audio_files {
         entry.push_phonetic(Phonetic {
             text: None,
             audio_url: Some(commons_audio_url(file)),
+            accent: accent.clone(),
         });
     }
     if entry.phonetic.is_none() {
-        entry.phonetic = extras.ipa.first().cloned();
+        entry.phonetic = extras.ipa.first().map(|(ipa, _)| ipa.clone());
     }
     let mut seen: Vec<String> = Vec::new();
     for meaning in &mut entry.meanings {

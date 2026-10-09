@@ -15,6 +15,9 @@ pub fn run(ctx: &Context, word: &str, note: Option<&str>) -> Result<()> {
                 println!("(No pronunciation audio, so it will not appear in listening practice.)");
             }
         }
+        AddOutcome::Restored => {
+            println!("Saved \"{name}\" again, with the study progress it had before.")
+        }
         AddOutcome::AlreadySaved => println!("\"{name}\" is already in your word list."),
         AddOutcome::NoteUpdated => println!("Updated the note for \"{name}\"."),
     }

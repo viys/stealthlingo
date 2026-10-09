@@ -1,6 +1,6 @@
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use stealthlingo::cli::StudyMode;
-use stealthlingo::dictionary::{free_dictionary, Entry, Source};
+use stealthlingo::dictionary::{self, legacy, wiktionary, Entry};
 use stealthlingo::learning::session::build_queue;
 use stealthlingo::learning::{schedule, Grade, PracticeMode, Status};
 use stealthlingo::storage::{AddOutcome, Database, NewAttempt};
@@ -20,9 +20,9 @@ fn raw_for(word: &str) -> String {
 
 /// Caches and saves a word; returns its id.
 fn save(db: &Database, word: &str, raw: &str, now: DateTime<Utc>) -> i64 {
-    let entry: Entry = free_dictionary::parse(word, raw).unwrap();
+    let entry: Entry = legacy::parse(word, raw).unwrap();
     let id = db
-        .cache_word(word, &entry, raw, Source::FreeDictionary, now)
+        .cache_word(word, &entry, raw, dictionary::SOURCE, now)
         .unwrap();
     assert_eq!(
         db.add_to_collection(id, None, now).unwrap(),
@@ -86,12 +86,12 @@ fn migrations_run_once_and_persist_data() {
 #[test]
 fn saving_is_idempotent_and_updates_notes() {
     let db = Database::open_in_memory().unwrap();
-    let entry = free_dictionary::parse("hello", HELLO).unwrap();
+    let entry = legacy::parse("hello", HELLO).unwrap();
     let id = db
-        .cache_word("hello", &entry, HELLO, Source::FreeDictionary, t0())
+        .cache_word("hello", &entry, HELLO, dictionary::SOURCE, t0())
         .unwrap();
     let again = db
-        .cache_word("hello", &entry, HELLO, Source::FreeDictionary, t0())
+        .cache_word("hello", &entry, HELLO, dictionary::SOURCE, t0())
         .unwrap();
     assert_eq!(id, again);
 
@@ -125,6 +125,52 @@ fn remove_keeps_cache_but_drops_from_list() {
     assert_eq!(db.collection_size().unwrap(), 0);
     let cached = db.find_cached("hello").unwrap().unwrap();
     assert!(!cached.in_collection);
+}
+
+#[test]
+fn archived_words_come_back_with_their_progress() {
+    let mut db = Database::open_in_memory().unwrap();
+    let id = save(&db, "hello", HELLO, t0());
+    db.add_to_collection(id, Some("你好"), t0()).unwrap();
+    answer(&mut db, id, Grade::Good, t0());
+    answer(&mut db, id, Grade::Good, t0() + Duration::days(1));
+    let progress = |db: &Database| {
+        let w = db.list_words(None).unwrap().pop().unwrap();
+        (w.status, w.due_at, w.repetitions, w.interval_days, w.note)
+    };
+    let before = progress(&db);
+    assert_eq!(before.2, 2);
+
+    assert!(db.archive_from_collection("hello", t0()).unwrap());
+    assert!(!db.archive_from_collection("hello", t0()).unwrap());
+    assert_eq!(db.collection_size().unwrap(), 0);
+    assert!(!db.find_cached("hello").unwrap().unwrap().in_collection);
+
+    assert_eq!(
+        db.add_to_collection(id, None, t0()).unwrap(),
+        AddOutcome::Restored
+    );
+    assert_eq!(progress(&db), before);
+    assert_eq!(
+        db.add_to_collection(id, None, t0()).unwrap(),
+        AddOutcome::AlreadySaved
+    );
+
+    // A note given while restoring replaces the archived one.
+    db.archive_from_collection("hello", t0()).unwrap();
+    assert_eq!(
+        db.add_to_collection(id, Some("hi"), t0()).unwrap(),
+        AddOutcome::Restored
+    );
+    assert_eq!(progress(&db).4.as_deref(), Some("hi"));
+
+    // `remove` (the command) starts the word over.
+    assert!(db.remove_from_collection("hello").unwrap());
+    assert_eq!(
+        db.add_to_collection(id, None, t0()).unwrap(),
+        AddOutcome::Added
+    );
+    assert_eq!(progress(&db).2, 0);
 }
 
 #[test]
@@ -244,13 +290,13 @@ fn backup_round_trip_and_idempotent_import() {
     let hello = save(&source, "hello", HELLO, t0());
     source.add_to_collection(hello, Some("你好"), t0()).unwrap();
     save(&source, "ephemeral", SPARSE, t0());
-    let unsaved = free_dictionary::parse("lookup", &raw_for("lookup")).unwrap();
+    let unsaved = legacy::parse("lookup", &raw_for("lookup")).unwrap();
     source
         .cache_word(
             "lookup",
             &unsaved,
             &raw_for("lookup"),
-            Source::FreeDictionary,
+            dictionary::SOURCE,
             t0(),
         )
         .unwrap();
@@ -323,8 +369,8 @@ fn import_rejects_foreign_or_invalid_backups() {
 #[test]
 fn schema_is_migrated_to_latest_version() {
     let db = Database::open_in_memory().unwrap();
-    assert_eq!(db.schema_version().unwrap(), 3);
-    assert_eq!(Database::latest_schema_version(), 3);
+    assert_eq!(db.schema_version().unwrap(), 4);
+    assert_eq!(Database::latest_schema_version(), 4);
 }
 
 #[test]
@@ -343,9 +389,9 @@ fn aliases_resolve_to_the_dictionary_headword() {
 
     // A real entry for the typed form wins over the alias.
     let raw = raw_for("ran");
-    let entry = free_dictionary::parse("ran", &raw).unwrap();
+    let entry = legacy::parse("ran", &raw).unwrap();
     let ran = db
-        .cache_word("ran", &entry, &raw, Source::FreeDictionary, t0())
+        .cache_word("ran", &entry, &raw, dictionary::SOURCE, t0())
         .unwrap();
     assert_eq!(db.find_cached("ran").unwrap().unwrap().id, ran);
     assert!(
@@ -361,42 +407,33 @@ fn aliases_resolve_to_the_dictionary_headword() {
 }
 
 #[test]
-fn caches_entries_from_other_sources() {
+fn caches_wiktionary_entries() {
     let db = Database::open_in_memory().unwrap();
     let raw = include_str!("fixtures/wiktionary_ephemeral.json");
-    let entry = stealthlingo::dictionary::wiktionary::parse_definitions("ephemeral", raw).unwrap();
+    let entry = wiktionary::parse_definitions("ephemeral", raw).unwrap();
     let id = db
-        .cache_word("ephemeral", &entry, raw, Source::Wiktionary, t0())
+        .cache_word("ephemeral", &entry, raw, dictionary::SOURCE, t0())
         .unwrap();
     db.add_to_collection(id, None, t0()).unwrap();
 
     let cached = db.find_cached("ephemeral").unwrap().unwrap();
-    assert_eq!(cached.source, Source::Wiktionary);
+    assert_eq!(cached.source, dictionary::SOURCE);
     assert_eq!(cached.entry, entry);
     let listed = &db.list_words(None).unwrap()[0];
     assert_eq!(listed.summary, entry.short_summary());
     assert_eq!(db.new_items(10, false).unwrap()[0].entry, entry);
 
-    // Re-fetching from another source replaces the cached entry.
-    let hello = free_dictionary::parse("ephemeral", SPARSE).unwrap();
-    db.cache_word("ephemeral", &hello, SPARSE, Source::FreeDictionary, t0())
-        .unwrap();
-    let cached = db.find_cached("ephemeral").unwrap().unwrap();
-    assert_eq!(cached.source, Source::FreeDictionary);
-    assert!(cached.in_collection);
-
     let mut target = Database::open_in_memory().unwrap();
     let backup = db.export_backup(t0()).unwrap();
-    assert_eq!(backup.words[0].source, "free-dictionary");
+    assert_eq!(backup.words[0].source, dictionary::SOURCE);
     target.import_backup(&backup).unwrap();
     assert_eq!(
         target.find_cached("ephemeral").unwrap().unwrap().entry,
-        hello
+        entry
     );
 }
 
-#[test]
-fn imports_version_1_backups() {
+fn version_1_backup() -> stealthlingo::storage::Backup {
     let raw = serde_json::to_string(HELLO).unwrap();
     let raw = raw.trim_matches('"');
     let json = format!(
@@ -405,11 +442,26 @@ fn imports_version_1_backups() {
             "raw_response_json":"{raw}","has_audio":true,
             "source_fetched_at":"2026-03-01T08:00:00.000000Z","created_at":"2026-03-01T08:00:00.000000Z"}}]}}"#
     );
-    let backup = serde_json::from_str(&json).unwrap();
+    serde_json::from_str(&json).unwrap()
+}
+
+#[test]
+fn imports_version_1_backups_and_replaces_them_with_wiktionary_data() {
     let mut db = Database::open_in_memory().unwrap();
-    let summary = db.import_backup(&backup).unwrap();
+    let summary = db.import_backup(&version_1_backup()).unwrap();
     assert_eq!(summary.words_added, 1);
     let cached = db.find_cached("hello").unwrap().unwrap();
-    assert_eq!(cached.source, Source::FreeDictionary);
+    assert_eq!(cached.source, "free-dictionary");
     assert!(cached.entry.has_audio());
+    db.add_to_collection(cached.id, Some("你好"), t0()).unwrap();
+
+    let raw = include_str!("fixtures/wiktionary_ephemeral.json");
+    let entry = wiktionary::parse_definitions("hello", raw).unwrap();
+    db.cache_word("hello", &entry, raw, dictionary::SOURCE, t0())
+        .unwrap();
+    let cached = db.find_cached("hello").unwrap().unwrap();
+    assert_eq!(cached.source, dictionary::SOURCE);
+    assert_eq!(cached.entry, entry);
+    assert!(cached.in_collection);
+    assert_eq!(cached.note.as_deref(), Some("你好"));
 }

@@ -2,8 +2,6 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::dictionary::Source;
-
 /// Quick, low-distraction vocabulary practice in your terminal.
 ///
 /// Run without a command to start today's practice: due reviews first,
@@ -11,18 +9,19 @@ use crate::dictionary::Source;
 #[derive(Debug, Parser)]
 #[command(name = "stealthlingo", version, about, long_about)]
 pub struct Cli {
-    /// Dictionary to query for this command (overrides `config set dictionary_source`)
-    #[arg(long, global = true, value_enum)]
-    pub source: Option<Source>,
-
     #[command(subcommand)]
     pub command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Look up a word in the Free Dictionary API
-    Lookup { word: String },
+    /// Look up a word in English Wiktionary
+    Lookup {
+        word: String,
+        /// Show every definition with examples, synonyms and the source
+        #[arg(long, short)]
+        all: bool,
+    },
     /// Save a word to your study list
     Add {
         word: String,
@@ -56,6 +55,11 @@ pub enum Command {
         #[command(subcommand)]
         action: Option<ConfigAction>,
     },
+    /// Ctrl+click pronunciations in `lookup` to play them (Windows)
+    Links {
+        #[command(subcommand)]
+        action: Option<LinksAction>,
+    },
     /// Export your words and progress (.json full backup, .csv word list)
     Export { path: PathBuf },
     /// Import words (.json backup or .csv word list with a "word" column)
@@ -84,6 +88,19 @@ pub enum StudyMode {
     Spelling,
     /// Hear the pronunciation, type the word
     Listening,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LinksAction {
+    /// Show whether links are set up and whether this terminal can show them
+    Status,
+    /// Register the stealthlingo:// link handler for the current user
+    Install,
+    /// Remove the link handler
+    Uninstall,
+    /// Play the recording behind a stealthlingo:// link (what a click runs)
+    #[command(hide = true)]
+    Open { link: String },
 }
 
 #[derive(Debug, Subcommand)]

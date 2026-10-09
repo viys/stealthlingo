@@ -4,7 +4,7 @@ use reqwest::blocking::Client;
 use reqwest::Url;
 
 use super::models::Entry;
-use super::{free_dictionary, merriam_webster, wiktionary, Source};
+use super::wiktionary;
 use crate::error::DictionaryError;
 
 pub const USER_AGENT: &str = concat!(
@@ -13,24 +13,35 @@ pub const USER_AGENT: &str = concat!(
     " (https://github.com/viys/stealthlingo)"
 );
 
-/// A successful lookup: the parsed entry plus the raw primary response.
+/// A successful lookup: the parsed entry plus the raw definition response.
 #[derive(Debug, Clone)]
 pub struct Fetched {
     pub entry: Entry,
     pub raw_json: String,
-    pub source: Source,
+    /// False when the page wikitext (pronunciations, audio, synonyms) could
+    /// not be fetched, so the entry only has definitions.
+    pub complete: bool,
 }
 
-#[derive(Debug, Clone)]
-pub struct SourceSettings {
-    pub source: Source,
-    pub free_dictionary_url: String,
-    pub merriam_webster_key: Option<String>,
+/// Wiktionary API base URLs. Tests point these at a closed local port.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Endpoints {
+    pub rest_base: String,
+    pub action_api: String,
+}
+
+impl Default for Endpoints {
+    fn default() -> Self {
+        Self {
+            rest_base: wiktionary::REST_BASE.to_string(),
+            action_api: wiktionary::ACTION_API.to_string(),
+        }
+    }
 }
 
 pub struct DictionaryClient {
     http: Client,
-    settings: SourceSettings,
+    endpoints: Endpoints,
     timeout: Duration,
 }
 
@@ -46,7 +57,7 @@ fn with_segment(base: &str, segment: &str) -> Result<Url, DictionaryError> {
 }
 
 impl DictionaryClient {
-    pub fn new(settings: SourceSettings, timeout: Duration) -> Result<Self, DictionaryError> {
+    pub fn new(endpoints: Endpoints, timeout: Duration) -> Result<Self, DictionaryError> {
         let http = Client::builder()
             .timeout(timeout)
             .user_agent(USER_AGENT)
@@ -54,34 +65,17 @@ impl DictionaryClient {
             .map_err(|e| DictionaryError::Network(e.to_string()))?;
         Ok(Self {
             http,
-            settings,
+            endpoints,
             timeout,
         })
     }
 
-    pub fn source(&self) -> Source {
-        self.settings.source
-    }
-
-    /// URL of the primary request for `word` with the configured source.
+    /// URL of the definition request for `word`.
     pub fn entry_url(&self, word: &str) -> Result<Url, DictionaryError> {
-        let word = word.trim();
-        match self.settings.source {
-            Source::FreeDictionary => with_segment(&self.settings.free_dictionary_url, word),
-            Source::Wiktionary => {
-                with_segment(wiktionary::REST_BASE, &wiktionary::page_title(word))
-            }
-            Source::MerriamWebster => {
-                let key = self
-                    .settings
-                    .merriam_webster_key
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|k| !k.is_empty())
-                    .ok_or_else(merriam_webster::missing_key_error)?;
-                Ok(merriam_webster::entry_url(word, key))
-            }
-        }
+        with_segment(
+            &self.endpoints.rest_base,
+            &wiktionary::page_title(word.trim()),
+        )
     }
 
     /// Sends a GET request that must finish before `deadline`.
@@ -102,37 +96,14 @@ impl DictionaryClient {
         Ok((status, body))
     }
 
-    /// Looks `word` up. The whole lookup, including any follow-up requests,
+    /// Looks `word` up. The whole lookup, including the pronunciation request,
     /// shares one `http_timeout_secs` budget.
-    pub fn fetch(&self, word: &str) -> Result<Fetched, DictionaryError> {
-        let source = self.settings.source;
-        let deadline = Instant::now() + self.timeout;
-        let (entry, raw_json) = match source {
-            Source::FreeDictionary => {
-                let (status, body) = self.get(self.entry_url(word)?, deadline)?;
-                (free_dictionary::interpret(word, status, &body)?, body)
-            }
-            Source::MerriamWebster => {
-                let (status, body) = self.get(self.entry_url(word)?, deadline)?;
-                (merriam_webster::interpret(word, status, &body)?, body)
-            }
-            Source::Wiktionary => self.fetch_wiktionary(word, deadline)?,
-        };
-        Ok(Fetched {
-            entry,
-            raw_json,
-            source,
-        })
-    }
-
+    ///
     /// Wiktionary titles are case-sensitive, so "Ephemeral" falls back to
     /// "ephemeral". Pronunciation data is best-effort: if the second request
     /// fails or runs out of time the definitions are still returned.
-    fn fetch_wiktionary(
-        &self,
-        word: &str,
-        deadline: Instant,
-    ) -> Result<(Entry, String), DictionaryError> {
+    pub fn fetch(&self, word: &str) -> Result<Fetched, DictionaryError> {
+        let deadline = Instant::now() + self.timeout;
         let typed = word.trim().to_string();
         let mut candidates = vec![typed.clone()];
         let lower = typed.to_lowercase();
@@ -143,16 +114,20 @@ impl DictionaryClient {
             let (status, body) = self.get(self.entry_url(candidate)?, deadline)?;
             match wiktionary::interpret_definitions(candidate, status, &body) {
                 Ok(mut entry) => {
-                    if let Ok((200, page)) = self.get(wiktionary::wikitext_url(candidate), deadline)
-                    {
-                        if let Some(wikitext) = wiktionary::extract_wikitext(&page) {
-                            wiktionary::apply_extras(
-                                &mut entry,
-                                wiktionary::parse_wikitext(&wikitext),
-                            );
-                        }
+                    let page_url = wiktionary::wikitext_url(&self.endpoints.action_api, candidate)?;
+                    let wikitext = match self.get(page_url, deadline) {
+                        Ok((200, page)) => wiktionary::extract_wikitext(&page),
+                        _ => None,
+                    };
+                    let complete = wikitext.is_some();
+                    if let Some(wikitext) = wikitext {
+                        wiktionary::apply_extras(&mut entry, wiktionary::parse_wikitext(&wikitext));
                     }
-                    return Ok((entry, body));
+                    return Ok(Fetched {
+                        entry,
+                        raw_json: body,
+                        complete,
+                    });
                 }
                 Err(DictionaryError::NotFound(_)) => continue,
                 Err(err) => return Err(err),
@@ -173,7 +148,6 @@ fn describe_request_error(err: reqwest::Error, timeout: Duration) -> DictionaryE
     } else if err.is_timeout() {
         DictionaryError::Timeout(timeout.as_secs())
     } else {
-        // The URL may carry an API key (Merriam-Webster), so it is never shown.
         DictionaryError::Network(err.without_url().to_string())
     }
 }

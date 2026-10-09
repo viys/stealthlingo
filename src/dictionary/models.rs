@@ -18,6 +18,8 @@ pub struct Entry {
 pub struct Phonetic {
     pub text: Option<String>,
     pub audio_url: Option<String>,
+    /// Short accent name such as "UK" or "US" (see [`accent_name`]).
+    pub accent: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -56,6 +58,50 @@ pub fn normalize_audio_url(raw: &str) -> Option<String> {
     }
 }
 
+/// Maps a dialect label used by dictionaries ("RP", "GA", "en-GB", ...) to a
+/// short accent name. Labels that are not accents (e.g. "cot-caught") give `None`.
+pub fn accent_name(label: &str) -> Option<&'static str> {
+    let key = label.trim().to_lowercase().replace('_', "-");
+    let name = match key.as_str() {
+        "uk"
+        | "gb"
+        | "en-gb"
+        | "rp"
+        | "ssb"
+        | "british"
+        | "britain"
+        | "england"
+        | "received pronunciation"
+        | "standard southern british" => "UK",
+        "us" | "en-us" | "ga" | "genam" | "usa" | "american" | "general american" => "US",
+        "ca" | "canada" | "canadian" | "cane" => "Canada",
+        "au" | "aus" | "aue" | "australia" | "australian" | "general australian" => "Australia",
+        "nz" | "new zealand" => "New Zealand",
+        "ie" | "ireland" | "irish" => "Ireland",
+        "indic" | "india" | "indian" | "inde" | "indian english" | "general indian english" => {
+            "India"
+        }
+        "scotland" | "scottish" | "sce" => "Scotland",
+        "south africa" | "sae" => "South Africa",
+        _ => return None,
+    };
+    Some(name)
+}
+
+/// Accent of a recording guessed from its file name, as in `hello-uk.mp3`,
+/// `hello--_gb_1.mp3` or `En-us-hostel.ogg`.
+pub fn accent_from_audio_url(url: &str) -> Option<&'static str> {
+    let file = url.rsplit('/').next()?;
+    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
+    // The first token is the word itself or a language code.
+    stem.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .skip(1)
+        .map(str::to_lowercase)
+        .find(|t| matches!(t.as_str(), "uk" | "gb" | "us" | "au" | "ca" | "nz" | "ie"))
+        .and_then(|t| accent_name(&t))
+}
+
 pub(crate) fn non_blank(value: Option<String>) -> Option<String> {
     value
         .map(|v| v.trim().to_string())
@@ -72,9 +118,23 @@ pub(crate) fn push_unique(target: &mut Vec<String>, items: impl IntoIterator<Ite
 }
 
 impl Entry {
+    /// The pronunciation whose recording is played: a UK or US recording when
+    /// available, otherwise the first one.
+    pub fn audio(&self) -> Option<&Phonetic> {
+        let mut recordings = self.phonetics.iter().filter(|p| p.audio_url.is_some());
+        ["UK", "US"]
+            .iter()
+            .find_map(|accent| {
+                recordings
+                    .clone()
+                    .find(|p| p.accent.as_deref() == Some(accent))
+            })
+            .or_else(|| recordings.next())
+    }
+
     /// First usable pronunciation audio URL, if any.
     pub fn audio_url(&self) -> Option<&str> {
-        self.phonetics.iter().find_map(|p| p.audio_url.as_deref())
+        self.audio().and_then(|p| p.audio_url.as_deref())
     }
 
     pub fn has_audio(&self) -> bool {

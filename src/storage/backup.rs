@@ -6,7 +6,7 @@ use rusqlite::{params, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 
 use super::Database;
-use crate::dictionary::{decode_cached, Source};
+use crate::dictionary::decode_cached;
 use crate::learning::{Grade, PracticeMode, Status};
 use crate::time::{from_db, to_db};
 
@@ -14,8 +14,9 @@ pub const BACKUP_FORMAT: &str = "stealthlingo-backup";
 /// Version 2 added `source` and `entry_json`; version 1 files still import.
 pub const BACKUP_VERSION: u32 = 2;
 
+/// Version 1 backups only contain Free Dictionary responses.
 fn default_source() -> String {
-    Source::FreeDictionary.as_str().to_string()
+    "free-dictionary".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -197,8 +198,10 @@ fn import_word(tx: &Transaction<'_>, word: &BackupWord, summary: &mut ImportSumm
     if headword.is_empty() {
         bail!("empty headword");
     }
-    let source = Source::parse(&word.source)
-        .with_context(|| format!("unknown dictionary source \"{}\"", word.source))?;
+    let source = word.source.trim();
+    if source.is_empty() {
+        bail!("missing dictionary source");
+    }
     decode_cached(
         &word.display_word,
         &word.raw_response_json,
@@ -230,7 +233,7 @@ fn import_word(tx: &Transaction<'_>, word: &BackupWord, summary: &mut ImportSumm
                     word.has_audio,
                     fetched_at,
                     created_at,
-                    source.as_str(),
+                    source,
                     word.entry_json
                 ],
                 |row| row.get(0),
@@ -248,7 +251,7 @@ fn import_word(tx: &Transaction<'_>, word: &BackupWord, summary: &mut ImportSumm
                         word.raw_response_json,
                         word.has_audio,
                         fetched_at,
-                        source.as_str(),
+                        source,
                         word.entry_json
                     ],
                 )?;

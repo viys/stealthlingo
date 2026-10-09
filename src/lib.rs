@@ -1,5 +1,5 @@
 //! StealthLingo: a terminal-first vocabulary trainer backed by online dictionaries
-//! (Wiktionary, the Free Dictionary API or Merriam-Webster) and a local SQLite cache.
+//! (English Wiktionary) and a local SQLite cache.
 
 pub mod audio;
 pub mod cli;

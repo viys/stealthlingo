@@ -20,14 +20,14 @@ pub enum DictionaryError {
     Server(u16),
     #[error("could not understand the dictionary response: {0}")]
     Parse(String),
-    /// The selected dictionary source is not usable as configured (e.g. missing key).
+    /// The dictionary endpoint is misconfigured (e.g. an invalid URL).
     #[error("{0}")]
     Config(String),
 }
 
 fn describe_status(status: u16) -> String {
     match status {
-        // Cloudflare, which fronts the Free Dictionary API, reports origin failures as 52x.
+        // CDNs such as Cloudflare report origin failures as 52x.
         520..=527 | 530 => format!(
             "the dictionary service is down right now (HTTP {status}: its server is not responding); \
              this is a problem on its side, not your connection"
