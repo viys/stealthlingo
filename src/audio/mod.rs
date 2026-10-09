@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use reqwest::blocking::Client;
 
+#[derive(Clone)]
 pub struct AudioPlayer {
     cache_dir: PathBuf,
     http: Client,

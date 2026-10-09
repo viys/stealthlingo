@@ -61,6 +61,9 @@ pub struct Config {
     /// Session length used when neither --minutes nor --count is given.
     pub default_minutes: u32,
     pub http_timeout_secs: u64,
+    /// Pronunciation played by default: "UK" or "US". Words recorded in only
+    /// one accent play that one.
+    pub accent: String,
 }
 
 impl Default for Config {
@@ -69,11 +72,25 @@ impl Default for Config {
             daily_new_limit: 10,
             default_minutes: 5,
             http_timeout_secs: 10,
+            accent: "UK".to_string(),
         }
     }
 }
 
-pub const CONFIG_KEYS: &[&str] = &["daily_new_limit", "default_minutes", "http_timeout_secs"];
+pub const CONFIG_KEYS: &[&str] = &[
+    "daily_new_limit",
+    "default_minutes",
+    "http_timeout_secs",
+    "accent",
+];
+
+/// "UK" or "US" for the spellings people commonly use for them.
+pub fn parse_accent(value: &str) -> Result<&'static str> {
+    match crate::dictionary::accent_name(value) {
+        Some(accent @ ("UK" | "US")) => Ok(accent),
+        _ => bail!("accent must be uk or us, got \"{}\"", value.trim()),
+    }
+}
 
 impl Config {
     /// Loads the config file, falling back to defaults when it does not exist.
@@ -118,6 +135,10 @@ impl Config {
                 self.http_timeout_secs = secs;
                 "http_timeout_secs"
             }
+            "accent" => {
+                self.accent = parse_accent(value)?.to_string();
+                "accent"
+            }
             "dictionary_source"
             | "source"
             | "free_dictionary_url"
@@ -139,6 +160,7 @@ impl Config {
             ("daily_new_limit", self.daily_new_limit.to_string()),
             ("default_minutes", self.default_minutes.to_string()),
             ("http_timeout_secs", self.http_timeout_secs.to_string()),
+            ("accent", self.accent.clone()),
         ]
     }
 }
@@ -187,6 +209,11 @@ mod tests {
         assert!(config.set("default_minutes", "0").is_err());
         assert!(config.set("http_timeout_secs", "0").is_err());
         assert!(config.set("nope", "1").is_err());
+        assert!(config.set("accent", "india").is_err());
+        config.set("accent", "us").unwrap();
+        assert_eq!(config.accent, "US");
+        config.set("accent", "British").unwrap();
+        assert_eq!(config.accent, "UK");
         let removed = config
             .set("dictionary_source", "free-dictionary")
             .unwrap_err();

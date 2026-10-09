@@ -475,7 +475,7 @@ fn renders_other_and_missing_pronunciations() {
     assert!(render_entry(&entry, Detail::Brief, false).contains("Pronunciation: /haɪ/\n"));
     assert_eq!(
         next_steps(&entry, false, false),
-        "Save it: `stealthlingo add hi`. Listen: `stealthlingo audio hi` (UK)."
+        "Save it: `stealthlingo add hi`. Listen: `stealthlingo audio hi --accent uk|us`."
     );
 
     let entry = Entry {

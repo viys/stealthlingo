@@ -12,7 +12,7 @@ use chrono::Utc;
 use reqwest::Url;
 
 use super::{cached_or_fetch, Context};
-use crate::dictionary::{normalize_headword, Entry};
+use crate::dictionary::normalize_headword;
 
 pub const SCHEME: &str = "stealthlingo";
 const HANDLER_NAME: &str = "stealthlingo-link";
@@ -186,7 +186,11 @@ pub fn open(ctx: &Context, link: &str) -> Result<()> {
     match LinkAction::parse(link)? {
         LinkAction::Audio { word, accent } => {
             let (cached, _) = cached_or_fetch(ctx, &word)?;
-            let url = recording_for(&cached.entry, accent.as_deref())
+            let accent = accent.as_deref().unwrap_or(&ctx.config.accent);
+            let url = cached
+                .entry
+                .audio_in(Some(accent))
+                .and_then(|p| p.audio_url.as_deref())
                 .ok_or_else(|| anyhow!("no pronunciation audio for \"{word}\""))?;
             ctx.audio_player()?
                 .play(&normalize_headword(&cached.entry.word), url)
@@ -202,19 +206,6 @@ pub fn open(ctx: &Context, link: &str) -> Result<()> {
             Ok(())
         }
     }
-}
-
-/// Recording in the requested accent, or the default one.
-fn recording_for<'a>(entry: &'a Entry, accent: Option<&str>) -> Option<&'a str> {
-    accent
-        .and_then(|accent| {
-            entry
-                .phonetics
-                .iter()
-                .find(|p| p.audio_url.is_some() && p.accent.as_deref() == Some(accent))
-        })
-        .or_else(|| entry.audio())
-        .and_then(|p| p.audio_url.as_deref())
 }
 
 /// The windowless handler program installed next to `stealthlingo`.

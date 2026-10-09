@@ -8,7 +8,7 @@ use crate::dictionary::{Entry, Meaning};
 use crate::time::format_local;
 
 const BRIEF_MEANINGS: usize = 3;
-const BRIEF_DEFINITIONS_PER_MEANING: usize = 3;
+pub(crate) const BRIEF_DEFINITIONS_PER_MEANING: usize = 3;
 const MAX_ACCENTS: usize = 2;
 const MAX_UNLABELLED_TRANSCRIPTIONS: usize = 3;
 
@@ -236,7 +236,7 @@ fn console_width() -> Option<usize> {
 
 /// Meanings to print. The brief view skips `symbol` sections (such as ISO
 /// language codes) unless nothing else is left, and keeps the first few.
-fn shown_meanings(entry: &Entry, detail: Detail) -> Vec<&Meaning> {
+pub(crate) fn shown_meanings(entry: &Entry, detail: Detail) -> Vec<&Meaning> {
     if detail == Detail::Full {
         return entry.meanings.iter().collect();
     }
@@ -255,7 +255,7 @@ const MAIN_ACCENTS: [&str; 2] = ["UK", "US"];
 
 /// One line such as `UK /njuː/ · US /nu/`, or `/a/, /b/` without accent labels.
 /// With `links`, transcriptions that have a recording become clickable.
-fn pronunciation_line(entry: &Entry, links: bool) -> Option<String> {
+pub(crate) fn pronunciation_line(entry: &Entry, links: bool) -> Option<String> {
     let shown = shown_pronunciations(entry);
     let labelled = shown.first()?.0.is_some();
     let mut linked_unlabelled = false;
@@ -353,9 +353,16 @@ fn render_pronunciation(out: &mut String, entry: &Entry, links: bool) {
     );
 }
 
-/// `stealthlingo audio <word>` plus the accent of the recording it plays.
+/// `stealthlingo audio <word>` plus the accent of the recording it plays, or
+/// the `--accent` choice when the word is recorded in several accents.
 fn audio_hint(entry: &Entry) -> Option<String> {
     let audio = entry.audio()?;
+    if entry.recording_accents().len() > 1 {
+        return Some(format!(
+            "`stealthlingo audio {} --accent uk|us`",
+            command_arg(&entry.word)
+        ));
+    }
     let accent = audio
         .accent
         .as_deref()

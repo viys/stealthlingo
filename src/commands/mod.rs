@@ -20,6 +20,7 @@ use crate::config::{Config, Paths};
 use crate::dictionary::{self, normalize_headword, DictionaryClient, Endpoints};
 use crate::error::DictionaryError;
 use crate::storage::{CachedWord, Database};
+use crate::tui;
 
 /// Everything a command needs: resolved paths, configuration and the database.
 pub struct Context {
@@ -65,7 +66,17 @@ impl Context {
 pub fn run(cli: Cli) -> Result<()> {
     crate::learning::session::install_interrupt_handler();
     let mut ctx = Context::load()?;
+    let full_screen = !cli.plain && tui::available();
     match cli.command {
+        None if full_screen => tui::run(&mut ctx, tui::Start::Home),
+        Some(Command::Study(args)) if full_screen => tui::run(
+            &mut ctx,
+            tui::Start::Session(study::SessionRequest::study(&args)),
+        ),
+        Some(Command::Review { count, minutes }) if full_screen => tui::run(
+            &mut ctx,
+            tui::Start::Session(study::SessionRequest::review(count, minutes)),
+        ),
         None => default_entry(&mut ctx),
         Some(Command::Lookup { word, all }) => {
             let detail = if all {
@@ -82,7 +93,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Command::Study(args)) => study::run(&mut ctx, &args),
         Some(Command::Review { count, minutes }) => review::run(&mut ctx, count, minutes),
         Some(Command::Stats) => stats::run(&ctx),
-        Some(Command::Audio { word }) => audio::run(&ctx, &word),
+        Some(Command::Audio { word, accent }) => audio::run(&ctx, &word, accent.as_deref()),
         Some(Command::Config { action }) => config::run(&mut ctx, action),
         Some(Command::Links { action }) => match action.unwrap_or(LinksAction::Status) {
             LinksAction::Status => links::status(),

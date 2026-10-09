@@ -10,3 +10,4 @@ pub mod error;
 pub mod learning;
 pub mod storage;
 pub mod time;
+pub mod tui;

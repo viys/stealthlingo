@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 
-use super::scheduling::{schedule, Grade};
+use super::scheduling::{schedule, Grade, ScheduleState};
 use super::spelling::{is_correct_spelling, mask_word};
 use super::PracticeMode;
 use crate::audio::AudioPlayer;
@@ -22,9 +22,13 @@ static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
 /// Ctrl+C outside a session exits immediately. Inside a session the first
 /// Ctrl+C ends the session after the current prompt (answers already submitted
-/// are saved); a second one exits immediately.
+/// are saved); a second one exits immediately. The full-screen interface
+/// handles the signal itself so it can restore the terminal first.
 pub fn install_interrupt_handler() {
     let _ = ctrlc::set_handler(|| {
+        if crate::tui::on_interrupt_signal() {
+            return;
+        }
         if SESSION_ACTIVE.load(Ordering::SeqCst) && !INTERRUPTED.swap(true, Ordering::SeqCst) {
             eprintln!("\nStopping the session. Submitted answers are saved.");
         } else {
@@ -86,6 +90,8 @@ pub struct SessionPlan {
     pub mode: StudyMode,
     pub time_limit: Option<Duration>,
     pub max_answers: Option<usize>,
+    /// Accent of the recordings played by default ("UK" or "US").
+    pub accent: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -95,6 +101,192 @@ pub struct SessionSummary {
     pub skipped: usize,
     pub stopped_early: bool,
     pub time_up: bool,
+    /// Words answered wrong at least once, in the order they were missed.
+    pub missed: Vec<String>,
+}
+
+/// A submitted answer to one question.
+#[derive(Debug, Clone)]
+pub struct Answer {
+    pub submitted: Option<String>,
+    pub is_correct: bool,
+    pub grade: Grade,
+}
+
+/// Question order, limits and results of one session, independent of how
+/// questions are shown. Each answer is stored as soon as it is recorded.
+pub struct Session {
+    plan: SessionPlan,
+    queue: VecDeque<StudyItem>,
+    retried: HashSet<i64>,
+    summary: SessionSummary,
+    started: Instant,
+    paused_for: Duration,
+    paused_at: Option<Instant>,
+    shown: usize,
+}
+
+impl Session {
+    pub fn new(plan: SessionPlan, queue: Vec<StudyItem>) -> Self {
+        Self {
+            plan,
+            queue: queue.into(),
+            retried: HashSet::new(),
+            summary: SessionSummary::default(),
+            started: Instant::now(),
+            paused_for: Duration::ZERO,
+            paused_at: None,
+            shown: 0,
+        }
+    }
+
+    pub fn plan(&self) -> &SessionPlan {
+        &self.plan
+    }
+
+    pub fn summary(&self) -> &SessionSummary {
+        &self.summary
+    }
+
+    /// Questions shown so far, including the current one.
+    pub fn shown(&self) -> usize {
+        self.shown
+    }
+
+    /// Questions still to come, including the current one.
+    pub fn remaining(&self) -> usize {
+        let queued = self.queue.len() + 1;
+        match self.plan.max_answers {
+            Some(max) => max.saturating_sub(self.summary.answered).min(queued),
+            None => queued,
+        }
+    }
+
+    pub fn queue_is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
+
+    /// Study time so far, not counting pauses.
+    pub fn elapsed(&self) -> Duration {
+        let paused = self.paused_for + self.paused_at.map_or(Duration::ZERO, |at| at.elapsed());
+        self.started.elapsed().saturating_sub(paused)
+    }
+
+    pub fn time_left(&self) -> Option<Duration> {
+        self.plan
+            .time_limit
+            .map(|limit| limit.saturating_sub(self.elapsed()))
+    }
+
+    /// Stops the clock, e.g. while the screen is hidden.
+    pub fn pause(&mut self) {
+        self.paused_at.get_or_insert_with(Instant::now);
+    }
+
+    pub fn resume(&mut self) {
+        if let Some(at) = self.paused_at.take() {
+            self.paused_for += at.elapsed();
+        }
+    }
+
+    /// The next question, or `None` when the queue is empty or a limit is reached.
+    pub fn next_item(&mut self) -> Option<StudyItem> {
+        if self.summary.stopped_early {
+            return None;
+        }
+        if self
+            .plan
+            .max_answers
+            .is_some_and(|max| self.summary.answered >= max)
+        {
+            return None;
+        }
+        if self.time_left() == Some(Duration::ZERO) {
+            self.summary.time_up = true;
+            return None;
+        }
+        let item = self.queue.pop_front()?;
+        self.shown += 1;
+        Some(item)
+    }
+
+    /// Stores an answer and returns the new schedule. A missed word comes back
+    /// once at the end of this session.
+    pub fn record(
+        &mut self,
+        db: &mut Database,
+        mut item: StudyItem,
+        answer: &Answer,
+        took: Duration,
+    ) -> Result<ScheduleState> {
+        let now = Utc::now();
+        let next = schedule(&item.schedule, answer.grade, now);
+        db.record_attempt(
+            &NewAttempt {
+                word_id: item.word_id,
+                mode: self.plan.mode.practice_mode(),
+                expected: &item.entry.word,
+                submitted: answer.submitted.as_deref(),
+                is_correct: answer.is_correct,
+                grade: answer.grade,
+                duration_ms: Some(took.as_millis().min(i64::MAX as u128) as i64),
+            },
+            &next,
+            now,
+        )?;
+        self.summary.answered += 1;
+        if answer.is_correct {
+            self.summary.correct += 1;
+        } else if !self.summary.missed.contains(&item.entry.word) {
+            self.summary.missed.push(item.entry.word.clone());
+        }
+        item.schedule = next.clone();
+        if !answer.is_correct && self.retried.insert(item.word_id) {
+            self.queue.push_back(item);
+        }
+        Ok(next)
+    }
+
+    pub fn skip(&mut self) {
+        self.summary.skipped += 1;
+    }
+
+    /// Ends the session before the queue is done.
+    pub fn stop(&mut self) {
+        self.summary.stopped_early = true;
+    }
+}
+
+/// Text answers are graded Good when correct and Again when wrong.
+pub fn judge_spelling(expected: &str, submitted: &str) -> Answer {
+    let is_correct = is_correct_spelling(expected, submitted);
+    Answer {
+        submitted: Some(submitted.trim().to_string()),
+        is_correct,
+        grade: if is_correct {
+            Grade::Good
+        } else {
+            Grade::Again
+        },
+    }
+}
+
+/// A self-rated flashcard answer; only Again counts as a miss.
+pub fn memory_answer(grade: Grade) -> Answer {
+    Answer {
+        submitted: None,
+        is_correct: grade != Grade::Again,
+        grade,
+    }
+}
+
+/// Giving up on a typed answer counts as a miss.
+pub fn gave_up() -> Answer {
+    Answer {
+        submitted: None,
+        is_correct: false,
+        grade: Grade::Again,
+    }
 }
 
 enum Input {
@@ -126,11 +318,7 @@ fn read_input(prompt: &str) -> Result<Input> {
 }
 
 enum Outcome {
-    Answered {
-        submitted: Option<String>,
-        is_correct: bool,
-        grade: Grade,
-    },
+    Answered(Answer),
     Skipped,
     Quit,
 }
@@ -138,6 +326,7 @@ enum Outcome {
 struct Question<'a> {
     item: &'a StudyItem,
     audio: &'a AudioPlayer,
+    accent: &'a str,
 }
 
 impl Question<'_> {
@@ -146,7 +335,8 @@ impl Question<'_> {
     }
 
     fn play_audio(&self) -> bool {
-        let Some(url) = self.item.entry.audio_url() else {
+        let recording = self.item.entry.audio_in(Some(self.accent));
+        let Some(url) = recording.and_then(|p| p.audio_url.as_deref()) else {
             println!("No pronunciation audio for this word.");
             return false;
         };
@@ -180,36 +370,23 @@ fn session_loop(
     plan: &SessionPlan,
     queue: Vec<StudyItem>,
 ) -> Result<SessionSummary> {
-    let started = Instant::now();
-    let mut queue: VecDeque<StudyItem> = queue.into();
-    let mut retried: HashSet<i64> = HashSet::new();
-    let mut summary = SessionSummary::default();
-    let mut shown = 0usize;
+    let mut session = Session::new(plan.clone(), queue);
 
-    while let Some(mut item) = queue.pop_front() {
+    loop {
         if interrupted() {
-            summary.stopped_early = true;
+            session.stop();
             break;
         }
-        if plan.max_answers.is_some_and(|max| summary.answered >= max) {
+        let Some(item) = session.next_item() else {
             break;
-        }
-        if plan
-            .time_limit
-            .is_some_and(|limit| started.elapsed() >= limit)
-        {
-            summary.time_up = true;
-            break;
-        }
-
-        shown += 1;
-        let remaining = match plan.max_answers {
-            Some(max) => (max - summary.answered).min(queue.len() + 1),
-            None => queue.len() + 1,
         };
-        print_header(plan, shown, remaining, started);
+        print_header(&session);
 
-        let question = Question { item: &item, audio };
+        let question = Question {
+            item: &item,
+            audio,
+            accent: &plan.accent,
+        };
         let asked_at = Instant::now();
         let outcome = match plan.mode {
             StudyMode::Memory => ask_memory(&question)?,
@@ -217,66 +394,42 @@ fn session_loop(
             StudyMode::Listening => ask_listening(&question)?,
         };
 
-        let (submitted, is_correct, grade) = match outcome {
+        let answer = match outcome {
             Outcome::Quit => {
-                summary.stopped_early = true;
+                session.stop();
                 break;
             }
             Outcome::Skipped => {
-                summary.skipped += 1;
+                session.skip();
                 continue;
             }
-            Outcome::Answered {
-                submitted,
-                is_correct,
-                grade,
-            } => (submitted, is_correct, grade),
+            Outcome::Answered(answer) => answer,
         };
-
-        let now = Utc::now();
-        let next = schedule(&item.schedule, grade, now);
-        let expected = item.entry.word.clone();
-        db.record_attempt(
-            &NewAttempt {
-                word_id: item.word_id,
-                mode: plan.mode.practice_mode(),
-                expected: &expected,
-                submitted: submitted.as_deref(),
-                is_correct,
-                grade,
-                duration_ms: Some(asked_at.elapsed().as_millis().min(i64::MAX as u128) as i64),
-            },
-            &next,
-            now,
-        )?;
-        summary.answered += 1;
-        if is_correct {
-            summary.correct += 1;
-        }
-        println!("Next review: {}", describe_due(next.due_at, now));
-        item.schedule = next;
-
-        // A missed word comes back once at the end of this session.
-        if !is_correct && retried.insert(item.word_id) {
-            queue.push_back(item);
-        }
+        let next = session.record(db, item, &answer, asked_at.elapsed())?;
+        println!("Next review: {}", describe_due(next.due_at, Utc::now()));
     }
 
-    if queue.is_empty() && !summary.stopped_early && !summary.time_up {
-        println!();
-        println!("All done for now.");
-    } else if summary.time_up {
+    let summary = session.summary().clone();
+    if summary.time_up {
         println!();
         println!("Time's up.");
+    } else if session.queue_is_empty() && !summary.stopped_early {
+        println!();
+        println!("All done for now.");
     }
     Ok(summary)
 }
 
-fn print_header(plan: &SessionPlan, shown: usize, remaining: usize, started: Instant) {
+fn print_header(session: &Session) {
     println!();
-    let mut header = format!("{} · #{shown} · {remaining} left", plan.mode.label());
-    if let Some(limit) = plan.time_limit {
-        let left = limit.saturating_sub(started.elapsed()).as_secs();
+    let mut header = format!(
+        "{} · #{} · {} left",
+        session.plan().mode.label(),
+        session.shown(),
+        session.remaining()
+    );
+    if let Some(left) = session.time_left() {
+        let left = left.as_secs();
         header.push_str(&format!(" · {}:{:02} remaining", left / 60, left % 60));
     }
     println!("{header}");
@@ -365,11 +518,7 @@ fn ask_memory(q: &Question<'_>) -> Result<Outcome> {
                     continue;
                 }
                 if let Some(grade) = grade_from_input(&text) {
-                    return Ok(Outcome::Answered {
-                        submitted: None,
-                        is_correct: grade != Grade::Again,
-                        grade,
-                    });
+                    return Ok(Outcome::Answered(memory_answer(grade)));
                 }
                 println!("Please choose 1-4.");
             }
@@ -396,13 +545,7 @@ fn read_spelling(
                     "r" if allow_replay => {
                         q.play_audio();
                     }
-                    "?" => {
-                        return Ok(Err(Outcome::Answered {
-                            submitted: None,
-                            is_correct: false,
-                            grade: Grade::Again,
-                        }))
-                    }
+                    "?" => return Ok(Err(Outcome::Answered(gave_up()))),
                     _ => return Ok(Ok(trimmed.to_string())),
                 }
             }
@@ -413,17 +556,10 @@ fn read_spelling(
 fn judge(q: &Question<'_>, attempt: std::result::Result<String, Outcome>) -> Outcome {
     let entry = &q.item.entry;
     let outcome = match attempt {
-        Ok(answer) => {
-            let correct = is_correct_spelling(&entry.word, &answer);
-            Outcome::Answered {
-                submitted: Some(answer),
-                is_correct: correct,
-                grade: if correct { Grade::Good } else { Grade::Again },
-            }
-        }
+        Ok(answer) => Outcome::Answered(judge_spelling(&entry.word, &answer)),
         Err(outcome) => outcome,
     };
-    if let Outcome::Answered { is_correct, .. } = &outcome {
+    if let Outcome::Answered(Answer { is_correct, .. }) = &outcome {
         if *is_correct {
             println!("Correct!");
         } else {
@@ -461,9 +597,9 @@ fn ask_listening(q: &Question<'_>) -> Result<Outcome> {
     }
     let attempt = read_spelling(q, true)?;
     let outcome = judge(q, attempt);
-    if let Outcome::Answered {
+    if let Outcome::Answered(Answer {
         is_correct: true, ..
-    } = outcome
+    }) = outcome
     {
         println!("{}", q.item.entry.short_summary());
     }

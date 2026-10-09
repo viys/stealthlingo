@@ -29,14 +29,41 @@ at build time.
 ```bash
 stealthlingo lookup ephemeral          # pronunciation and the main definitions (--all for everything)
 stealthlingo add ephemeral --note 短暂的 # save it, with an optional personal note
-stealthlingo                           # today's practice: due reviews first, else new words
+stealthlingo                           # open the full-screen app: practice, look up, browse, stats
 ```
+
+## Full-screen interface
+
+In a terminal, `stealthlingo`, `study` and `review` open a full-screen interface.
+The home screen shows what is due today and a menu (`r` review, `s` flashcards,
+`p` spelling, `l` listening, `/` look up, `w` word list, `t` stats, `q` quit).
+
+- **Esc hides everything instantly** and shows the shell you started from; press
+  Esc again to come back. The session clock pauses while hidden.
+- **Flashcards** need no Enter: `Space` reveals, `1`–`4` rate, `a` plays the word,
+  `s` skips, `q` ends the session.
+- **Accents**: `a` plays your default accent (the `accent` setting) first; pressing
+  it again on the same word plays the other recorded accent, and so on. The footer
+  shows which accent comes next, the header which one is playing.
+- **Spelling and listening**: type the word and press `Enter`. `Tab` shows the
+  answer, `Ctrl+N` skips. In listening practice `Enter` on an empty line replays
+  the recording and `Ctrl+R` plays the other accent. A wrong answer shows which
+  letters were extra or missing.
+- **Word list**: `/` filters, `Enter` opens the saved entry (offline), `a` plays it,
+  `n` edits the note, `d` removes the word (saving it again restores its progress).
+- **Look up**: type a word and press `Enter`; then `s` saves or removes it, `Tab`
+  switches between the brief and the full entry.
+- `Ctrl+C` ends the current session, cancels a filter or note, and otherwise quits.
+  Every answer is saved as soon as it is given.
+
+`--plain` (or any non-terminal input/output, such as a pipe) uses the line-by-line
+prompts described below instead. `NO_COLOR` turns colors off.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `stealthlingo` | Review due words; if nothing is due, study new ones; with an empty list, explain how to start |
+| `stealthlingo` | Open the full-screen app. With `--plain`: review due words; if nothing is due, study new ones; with an empty list, explain how to start |
 | `lookup <WORD> [--all]` | Query Wiktionary (refreshes the cache; falls back to the cached copy when offline) |
 | `add <WORD> [--note TEXT]` | Save a word. Saving twice is harmless; `--note` updates the note |
 | `remove <WORD>` | Remove a word from your list (cached dictionary data and history are kept) |
@@ -45,7 +72,7 @@ stealthlingo                           # today's practice: due reviews first, el
 | `study [--mode memory\|spelling\|listening] [--minutes N] [--count N]` | Study session |
 | `review [--count N] [--minutes N]` | Flashcard review of due words only |
 | `stats` | Saved words, due count, today's answers and accuracy |
-| `audio <WORD>` | Play the pronunciation |
+| `audio <WORD> [--accent uk\|us]` | Play the pronunciation (default: the `accent` setting) |
 | `config` / `config set <KEY> <VALUE>` | Show or change settings and data locations |
 | `links [status\|install\|uninstall]` | Ctrl+click in `lookup` to play pronunciations and add or remove words (Windows) |
 | `export <PATH>` / `import <PATH>` | `.json` full backup, or `.csv` word list |
@@ -54,7 +81,7 @@ Without `--minutes` or `--count`, a session lasts `default_minutes` (5).
 
 `lookup` shows pronunciations on one line, UK first, then US
 (`Pronunciation: UK /njuː/ · US /nu/`), and names the accent of the recording
-that `audio` plays. By default it then lists the first three definitions of up
+that `audio` plays (or suggests `--accent uk|us` when there are both). By default it then lists the first three definitions of up
 to three parts of speech. `lookup --all` (or `-a`)
 shows every definition with examples, synonyms, antonyms and the source.
 Definitions wrap to the terminal width with their continuation lines indented.
@@ -81,6 +108,9 @@ removes the handler. Errors are written to `link-errors.log` in the data
 directory.
 
 ### Study modes
+
+The keys below are those of the line-by-line prompts (`--plain`); the full-screen
+interface uses single keys as described above.
 
 - **memory**: see the word, press Enter to reveal the meaning, then rate yourself
   `1` Again, `2` Hard, `3` Good, `4` Easy. Press `a` to hear the word.
@@ -118,7 +148,10 @@ more are shown as `mastered`.
 stealthlingo config set daily_new_limit 15
 stealthlingo config set default_minutes 3
 stealthlingo config set http_timeout_secs 10
+stealthlingo config set accent us        # play American recordings first (default: uk)
 ```
+
+Words recorded in only one accent always play that recording.
 
 ### Dictionary
 
@@ -189,7 +222,9 @@ cargo fmt --check
 
 The code is split into `dictionary` (Wiktionary client and parsers mapped to an
 `Entry` model, plus a decoder for data cached by v0.1), `storage` (SQLite),
-`learning` (scheduling, answer checking, sessions), `audio` and `commands`.
+`learning` (scheduling, answer checking, sessions), `audio`, `commands` and `tui`
+(the full-screen interface, built with ratatui). Both interfaces drive the same
+`learning::session::Session`.
 Scheduling is a pure function with its own tests in `tests/scheduling_tests.rs`.
 
 ## License

@@ -18,12 +18,14 @@ clap = { version = "4", features = ["derive"] }
 csv = "1"
 ctrlc = "3"
 directories = "6"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "std", "layout-cache"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rodio = { version = "0.20", default-features = false, features = ["symphonia-mp3", "vorbis", "wav", "flac"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+unicode-width = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

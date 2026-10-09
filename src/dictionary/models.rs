@@ -118,18 +118,43 @@ pub(crate) fn push_unique(target: &mut Vec<String>, items: impl IntoIterator<Ite
 }
 
 impl Entry {
-    /// The pronunciation whose recording is played: a UK or US recording when
-    /// available, otherwise the first one.
+    /// The pronunciation whose recording is played by default: a UK or US
+    /// recording when available, otherwise the first one.
     pub fn audio(&self) -> Option<&Phonetic> {
+        self.audio_in(None)
+    }
+
+    /// The recording in `accent` when there is one, otherwise the default
+    /// recording (UK, then US, then any).
+    pub fn audio_in(&self, accent: Option<&str>) -> Option<&Phonetic> {
         let mut recordings = self.phonetics.iter().filter(|p| p.audio_url.is_some());
-        ["UK", "US"]
-            .iter()
+        accent
+            .into_iter()
+            .chain(["UK", "US"])
             .find_map(|accent| {
                 recordings
                     .clone()
                     .find(|p| p.accent.as_deref() == Some(accent))
             })
             .or_else(|| recordings.next())
+    }
+
+    /// Accents that have a recording, UK and US first, each listed once.
+    pub fn recording_accents(&self) -> Vec<&str> {
+        let mut accents: Vec<&str> = Vec::new();
+        for accent in self
+            .phonetics
+            .iter()
+            .filter(|p| p.audio_url.is_some())
+            .filter_map(|p| p.accent.as_deref())
+        {
+            if !accents.contains(&accent) {
+                accents.push(accent);
+            }
+        }
+        let rank = |a: &str| ["UK", "US"].iter().position(|m| *m == a).unwrap_or(2);
+        accents.sort_by_key(|a| rank(a));
+        accents
     }
 
     /// First usable pronunciation audio URL, if any.

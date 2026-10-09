@@ -4,11 +4,14 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 /// Quick, low-distraction vocabulary practice in your terminal.
 ///
-/// Run without a command to start today's practice: due reviews first,
-/// otherwise a short session with new words.
+/// Run without a command to open the full-screen app (in a terminal), or to
+/// start today's practice with `--plain`.
 #[derive(Debug, Parser)]
 #[command(name = "stealthlingo", version, about, long_about)]
 pub struct Cli {
+    /// Use plain line-by-line prompts instead of the full-screen interface
+    #[arg(long, global = true)]
+    pub plain: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -49,7 +52,12 @@ pub enum Command {
     /// Show learning statistics
     Stats,
     /// Play the pronunciation of a word
-    Audio { word: String },
+    Audio {
+        word: String,
+        /// uk or us (default: the `accent` setting)
+        #[arg(long)]
+        accent: Option<String>,
+    },
     /// Show or change configuration
     Config {
         #[command(subcommand)]
