@@ -229,10 +229,14 @@ impl View for Words {
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         let filtering = matches!(self.mode, Mode::Filter) || !self.filter.text().is_empty();
+        let filter_height = if filtering { 2 } else { 0 };
+        // Short terminals shrink the details before the table drops below a
+        // header and four rows.
+        let detail_height = area.height.saturating_sub(filter_height + 5).clamp(3, 7);
         let [filter_row, table_area, detail_area] = Layout::vertical([
-            Constraint::Length(if filtering { 2 } else { 0 }),
+            Constraint::Length(filter_height),
             Constraint::Min(3),
-            Constraint::Length(7),
+            Constraint::Length(detail_height),
         ])
         .areas(area);
         self.page = table_area.height.saturating_sub(2).max(1) as usize;
@@ -329,11 +333,16 @@ impl View for Words {
         let width = inner.width as usize;
         let lines = self.detail_lines(width);
         let used = lines.len() as u16;
-        frame.render_widget(Paragraph::new(lines), inner);
+        let input_rows = u16::from(matches!(self.mode, Mode::Note(_)));
+        let text = Rect {
+            height: inner.height.saturating_sub(input_rows),
+            ..inner
+        };
+        frame.render_widget(Paragraph::new(lines), text);
         if let Mode::Note(input) = &self.mode {
-            if inner.height > used {
+            if inner.height > 0 {
                 let row = Rect {
-                    y: inner.y + used,
+                    y: text.y + used.min(text.height),
                     height: 1,
                     ..inner
                 };

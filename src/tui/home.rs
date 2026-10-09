@@ -1,12 +1,13 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Padding, Paragraph};
+use ratatui::widgets::{Block, BorderType, Paragraph};
 use ratatui::Frame;
 
-use super::{theme, Fx, Target, View};
+use super::{theme, widgets, Fx, Target, View};
 use crate::cli::StudyMode;
 use crate::commands::study::SessionRequest;
 use crate::commands::Context;
@@ -42,6 +43,8 @@ pub struct Home {
     correct_today: i64,
     next_due: Option<DateTime<Utc>>,
     selected: usize,
+    /// First menu row shown when the menu does not fit.
+    menu_offset: usize,
 }
 
 impl Home {
@@ -63,6 +66,7 @@ impl Home {
             next_due: stats.next_due,
             // Today's practice: reviews when something is due, otherwise new words.
             selected: if stats.due_now > 0 { 0 } else { 1 },
+            menu_offset: 0,
         };
         Ok(home)
     }
@@ -124,15 +128,7 @@ impl Home {
             String::new()
         };
         vec![
-            row(
-                "Due now",
-                self.due.to_string(),
-                if self.due > 0 {
-                    theme::warn()
-                } else {
-                    theme::good()
-                },
-            ),
+            row("Due now", self.due.to_string(), self.due_style()),
             row(
                 "New today",
                 format!("{} available", self.new_available),
@@ -151,6 +147,34 @@ impl Home {
             ),
         ]
     }
+
+    /// The numbers of [`Self::summary`] on one line, for short terminals.
+    fn compact_summary(&self) -> Vec<Line<'static>> {
+        if self.saved == 0 {
+            return self.summary();
+        }
+        let next = self
+            .next_due
+            .map_or("-".to_string(), |next| describe_due(next, Utc::now()));
+        vec![Line::from(vec![
+            Span::styled("Due ", theme::dim()),
+            Span::styled(self.due.to_string(), self.due_style()),
+            Span::styled(" · New ", theme::dim()),
+            Span::styled(self.new_available.to_string(), theme::strong()),
+            Span::styled(" · Answered ", theme::dim()),
+            Span::styled(self.answers_today.to_string(), theme::strong()),
+            Span::styled(" · Next ", theme::dim()),
+            Span::styled(next, theme::strong()),
+        ])]
+    }
+
+    fn due_style(&self) -> Style {
+        if self.due > 0 {
+            theme::warn()
+        } else {
+            theme::good()
+        }
+    }
 }
 
 impl View for Home {
@@ -163,22 +187,43 @@ impl View for Home {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
+        // Short terminals get a tighter box, then a one-line summary, then a
+        // scrolling menu, so the highlighted item is always on screen.
+        let menu_rows = MENU.len() as u16;
         let summary = self.summary();
-        let [top, _, menu] = Layout::vertical([
-            Constraint::Length(summary.len() as u16 + 4),
-            Constraint::Length(1),
-            Constraint::Min(0),
-        ])
-        .areas(area);
-        frame.render_widget(
-            Paragraph::new(summary).block(
-                Block::bordered()
-                    .border_type(BorderType::Rounded)
-                    .border_style(theme::dim())
-                    .title(Span::styled(" Today ", theme::heading()))
-                    .padding(Padding::new(2, 2, 1, 1)),
-            ),
-            top,
+        let rows = summary.len() as u16;
+        let room = area.height.saturating_sub(menu_rows + 1);
+        let top_height = if rows + 2 <= room {
+            let padding = widgets::box_padding(2, rows, room);
+            let height = widgets::box_height(rows, padding, room);
+            frame.render_widget(
+                Paragraph::new(summary).block(
+                    Block::bordered()
+                        .border_type(BorderType::Rounded)
+                        .border_style(theme::dim())
+                        .title(Span::styled(" Today ", theme::heading()))
+                        .padding(padding),
+                ),
+                Rect { height, ..area },
+            );
+            height
+        } else {
+            let compact = self.compact_summary();
+            let height = (compact.len() as u16).min(area.height);
+            frame.render_widget(Paragraph::new(compact), Rect { height, ..area });
+            height
+        };
+        let gap = u16::from(area.height > top_height + menu_rows);
+        let menu = Rect {
+            y: area.y + top_height + gap,
+            height: area.height.saturating_sub(top_height + gap),
+            ..area
+        };
+        self.menu_offset = widgets::scroll_to(
+            self.menu_offset,
+            self.selected,
+            menu.height as usize,
+            MENU.len(),
         );
 
         let lines: Vec<Line> = MENU
@@ -199,7 +244,10 @@ impl View for Home {
                 line
             })
             .collect();
-        frame.render_widget(Paragraph::new(lines), menu);
+        frame.render_widget(
+            Paragraph::new(lines).scroll((self.menu_offset as u16, 0)),
+            menu,
+        );
     }
 
     fn handle_key(&mut self, _ctx: &mut Context, key: KeyEvent, fx: &mut Fx) -> Result<()> {

@@ -31,7 +31,11 @@ fn context(dir: &tempfile::TempDir, saved: bool) -> Context {
 }
 
 fn screen(app: &mut App) -> String {
-    let mut terminal = Terminal::new(TestBackend::new(100, 32)).unwrap();
+    screen_sized(app, 100, 32)
+}
+
+fn screen_sized(app: &mut App, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|frame| app.render(frame)).unwrap();
     let buffer = terminal.backend().buffer();
     let width = buffer.area.width as usize;
@@ -103,6 +107,58 @@ fn menu_keys_keep_the_highlight_when_nothing_can_start() {
     let home = screen(&mut app);
     assert!(home.contains("Home"), "{home}");
     assert!(app.flash_text().unwrap().contains("listening practice"));
+}
+
+#[test]
+fn short_terminals_show_the_whole_home_menu() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    let home = screen_sized(&mut app, 100, 13);
+    assert!(home.contains("Answered 0"), "{home}");
+    assert!(home.contains("r  Review due words"), "{home}");
+    assert!(home.contains("q  Quit"), "{home}");
+}
+
+#[test]
+fn home_menu_scrolls_to_the_highlighted_item() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(&dir, false);
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    let home = screen_sized(&mut app, 100, 12);
+    assert!(home.contains("Your word list is empty"), "{home}");
+    assert!(!home.contains("Quit"), "{home}");
+
+    press(&mut app, &mut ctx, KeyCode::Up);
+    press(&mut app, &mut ctx, KeyCode::Up);
+    let home = screen_sized(&mut app, 100, 12);
+    assert!(home.contains("› q  Quit"), "{home}");
+}
+
+#[test]
+fn short_terminals_keep_the_spelling_answer_visible() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, session(StudyMode::Spelling)).unwrap();
+    type_text(&mut app, &mut ctx, "ephem");
+    let card = screen_sized(&mut app, 100, 12);
+    assert!(card.contains("› ephem"), "{card}");
+}
+
+#[test]
+fn stats_scroll_when_they_do_not_fit() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    press(&mut app, &mut ctx, KeyCode::Char('t'));
+    let stats = screen_sized(&mut app, 100, 12);
+    assert!(stats.contains("↑↓ scroll"), "{stats}");
+    assert!(!stats.contains("Accuracy"), "{stats}");
+    for _ in 0..20 {
+        press(&mut app, &mut ctx, KeyCode::Down);
+    }
+    let stats = screen_sized(&mut app, 100, 12);
+    assert!(stats.contains("Accuracy"), "{stats}");
 }
 
 #[test]

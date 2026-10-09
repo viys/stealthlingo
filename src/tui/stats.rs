@@ -4,7 +4,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Padding, Paragraph};
+use ratatui::widgets::{Block, BorderType, Paragraph};
 use ratatui::Frame;
 
 use super::{theme, widgets, Fx, Target, View};
@@ -15,6 +15,9 @@ use crate::time::{describe_due, format_local, local_day_start};
 
 pub struct Stats {
     stats: storage::Stats,
+    scroll: usize,
+    /// Lines that do not fit below the scroll position, as of the last draw.
+    max_scroll: usize,
 }
 
 impl Stats {
@@ -22,6 +25,8 @@ impl Stats {
         let now = Utc::now();
         Ok(Self {
             stats: ctx.db.stats(now, local_day_start(now))?,
+            scroll: 0,
+            max_scroll: 0,
         })
     }
 }
@@ -49,7 +54,11 @@ impl View for Stats {
     }
 
     fn hints(&self) -> Vec<(&'static str, &'static str)> {
-        vec![("q", "back")]
+        if self.max_scroll > 0 {
+            vec![("↑↓", "scroll"), ("q", "back")]
+        } else {
+            vec![("q", "back")]
+        }
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -115,24 +124,32 @@ impl View for Stats {
         accuracy_line.extend(widgets::progress_bar(accuracy, bar_width));
         lines.push(Line::from(accuracy_line));
 
+        let rows = lines.len() as u16;
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(theme::dim())
+            .title(Span::styled(" Progress ", theme::heading()))
+            .padding(widgets::box_padding(3, rows, area.height));
+        self.max_scroll = lines
+            .len()
+            .saturating_sub(block.inner(area).height as usize);
+        self.scroll = self.scroll.min(self.max_scroll);
         frame.render_widget(
-            Paragraph::new(lines).block(
-                Block::bordered()
-                    .border_type(BorderType::Rounded)
-                    .border_style(theme::dim())
-                    .title(Span::styled(" Progress ", theme::heading()))
-                    .padding(Padding::new(3, 3, 1, 1)),
-            ),
+            Paragraph::new(lines)
+                .block(block)
+                .scroll((self.scroll as u16, 0)),
             area,
         );
     }
 
     fn handle_key(&mut self, _ctx: &mut Context, key: KeyEvent, fx: &mut Fx) -> Result<()> {
-        if matches!(
-            key.code,
-            KeyCode::Char('q') | KeyCode::Enter | KeyCode::Backspace
-        ) {
-            fx.go(Target::Home);
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => self.scroll = self.scroll.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.scroll = (self.scroll + 1).min(self.max_scroll);
+            }
+            KeyCode::Char('q') | KeyCode::Enter | KeyCode::Backspace => fx.go(Target::Home),
+            _ => {}
         }
         Ok(())
     }

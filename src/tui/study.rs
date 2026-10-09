@@ -322,27 +322,38 @@ impl Study {
 
     /// Draws the card in a box as tall as its content and returns the box.
     fn render_card(&self, card: &Card, frame: &mut Frame, area: Rect) -> Rect {
-        let block = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .border_style(theme::dim())
-            .padding(Padding::new(3, 3, 1, 1));
-        let width = block.inner(area).width as usize;
+        let width = Block::bordered()
+            .padding(Padding::horizontal(3))
+            .inner(area)
+            .width as usize;
         let lines = self.card_lines(card, width);
         let input_rows = if matches!(card.phase, Phase::Typing(_)) {
             2
         } else {
             0
         };
-        let height = (lines.len() as u16 + input_rows + 4).min(area.height);
-        let area = Rect { height, ..area };
-        let inner = block.inner(area);
         let used = lines.len() as u16;
+        let padding = widgets::box_padding(3, used + input_rows, area.height);
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(theme::dim())
+            .padding(padding);
+        let area = Rect {
+            height: widgets::box_height(used + input_rows, padding, area.height),
+            ..area
+        };
+        let inner = block.inner(area);
+        // The answer field stays on screen even when the text has to be cut.
+        let text = Rect {
+            height: inner.height.saturating_sub(input_rows),
+            ..inner
+        };
         frame.render_widget(block, area);
-        frame.render_widget(Paragraph::new(lines), inner);
+        frame.render_widget(Paragraph::new(lines), text);
         if let Phase::Typing(input) = &card.phase {
-            if inner.height > used + 1 {
+            if inner.height >= input_rows {
                 let row = Rect {
-                    y: inner.y + used + 1,
+                    y: text.y + used.min(text.height) + 1,
                     height: 1,
                     ..inner
                 };
@@ -417,8 +428,10 @@ impl Study {
             lines.push(Line::raw(""));
             lines.push(Line::styled(next.to_string(), theme::dim()));
         }
+        let rows = lines.len() as u16;
+        let padding = widgets::box_padding(3, rows, area.height);
         let area = Rect {
-            height: (lines.len() as u16 + 4).min(area.height),
+            height: widgets::box_height(rows, padding, area.height),
             ..area
         };
         frame.render_widget(
@@ -430,7 +443,7 @@ impl Study {
                         format!(" {} ", self.request.title()),
                         theme::heading(),
                     ))
-                    .padding(Padding::new(3, 3, 1, 1)),
+                    .padding(padding),
             ),
             area,
         );

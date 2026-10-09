@@ -4,7 +4,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Padding, Paragraph};
 use ratatui::Frame;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -101,6 +101,34 @@ pub fn centered(area: Rect, max_width: u16) -> Rect {
         .flex(Flex::Center)
         .areas(area);
     middle
+}
+
+/// Padding for a bordered box holding `rows` of content: a blank row above and
+/// below when `available` rows leave room for them, none otherwise.
+pub fn box_padding(horizontal: u16, rows: u16, available: u16) -> Padding {
+    let vertical = u16::from(rows.saturating_add(4) <= available);
+    Padding::new(horizontal, horizontal, vertical, vertical)
+}
+
+/// Height of a bordered box with `padding` around `rows` of content, capped at
+/// `available`.
+pub fn box_height(rows: u16, padding: Padding, available: u16) -> u16 {
+    rows.saturating_add(2 + padding.top + padding.bottom)
+        .min(available)
+}
+
+/// First of `len` lines to show so that `selected` stays within `height` rows,
+/// moving `offset` as little as possible.
+pub fn scroll_to(offset: usize, selected: usize, height: usize, len: usize) -> usize {
+    let height = height.max(1);
+    let offset = if selected < offset {
+        selected
+    } else if selected >= offset + height {
+        selected + 1 - height
+    } else {
+        offset
+    };
+    offset.min(len.saturating_sub(height))
 }
 
 /// Word-wraps by display width; words wider than a line (such as Chinese
@@ -288,6 +316,24 @@ mod tests {
         assert_eq!(wrap_text("a bb ccc", 4), ["a bb", "ccc"]);
         assert_eq!(wrap_text("短暂的东西", 4), ["短暂", "的东", "西"]);
         assert_eq!(wrap_text("", 4), [""]);
+    }
+
+    #[test]
+    fn scrolls_just_enough_to_show_the_selection() {
+        assert_eq!(scroll_to(0, 2, 5, 8), 0);
+        assert_eq!(scroll_to(0, 7, 5, 8), 3);
+        assert_eq!(scroll_to(3, 4, 5, 8), 3);
+        assert_eq!(scroll_to(3, 1, 5, 8), 1);
+        // Once everything fits again, the list starts at the top.
+        assert_eq!(scroll_to(3, 7, 8, 8), 0);
+    }
+
+    #[test]
+    fn drops_box_padding_when_rows_are_short() {
+        assert_eq!(box_padding(2, 4, 8), Padding::new(2, 2, 1, 1));
+        assert_eq!(box_padding(2, 4, 7), Padding::new(2, 2, 0, 0));
+        assert_eq!(box_height(4, box_padding(2, 4, 7), 7), 6);
+        assert_eq!(box_height(10, box_padding(2, 10, 7), 7), 7);
     }
 
     #[test]
