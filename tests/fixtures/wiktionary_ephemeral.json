@@ -1,0 +1,50 @@
+{
+  "en": [
+    {
+      "partOfSpeech": "Adjective",
+      "language": "English",
+      "definitions": [
+        {
+          "definition": "Lasting for a short period of time.",
+          "parsedExamples": [
+            {
+              "example": "<i>The ephemeral <b>beauty</b></i> of cherry blossoms&nbsp;&amp; snow."
+            }
+          ],
+          "examples": [
+            "<i>The ephemeral beauty of cherry blossoms.</i>"
+          ]
+        },
+        {
+          "definition": "<span class=\"use-with-mention\">(<a href=\"/wiki/biology\">biology</a>)</span> Existing for only one day, as with some flowers.",
+          "examples": [
+            "Ephemeral flowers open at dawn."
+          ]
+        },
+        {
+          "definition": ""
+        }
+      ]
+    },
+    {
+      "partOfSpeech": "Noun",
+      "language": "English",
+      "definitions": [
+        {
+          "definition": "Something which lasts for a short period of time."
+        }
+      ]
+    }
+  ],
+  "fr": [
+    {
+      "partOfSpeech": "Adjective",
+      "language": "French",
+      "definitions": [
+        {
+          "definition": "ephemeral"
+        }
+      ]
+    }
+  ]
+}

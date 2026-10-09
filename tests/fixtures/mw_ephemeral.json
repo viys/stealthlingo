@@ -1,0 +1,73 @@
+[
+  {
+    "meta": {
+      "id": "ephemeral",
+      "uuid": "00000000-0000-0000-0000-000000000000",
+      "stems": ["ephemeral", "ephemerally", "ephemerals"],
+      "offensive": false
+    },
+    "hwi": {
+      "hw": "ephem*er*al",
+      "prs": [
+        {
+          "mw": "i-ˈfem-rəl",
+          "sound": { "audio": "ephemer01" }
+        },
+        {
+          "mw": "-ˈfē-mə-",
+          "sound": { "audio": "ephemer02" }
+        }
+      ]
+    },
+    "fl": "adjective",
+    "def": [
+      {
+        "sseq": [
+          [
+            [
+              "sense",
+              {
+                "sn": "1",
+                "dt": [
+                  ["text", "{bc}lasting one day only "],
+                  ["vis", [{ "t": "an {it}ephemeral{/it} fever" }]]
+                ]
+              }
+            ]
+          ],
+          [
+            [
+              "sense",
+              {
+                "sn": "2",
+                "dt": [
+                  ["text", "{bc}lasting a very short time "],
+                  ["vis", [{ "t": "{wi}ephemeral{/wi} pleasures" }]]
+                ]
+              }
+            ]
+          ]
+        ]
+      }
+    ],
+    "shortdef": ["lasting one day only", "lasting a very short time"]
+  },
+  {
+    "meta": {
+      "id": "ephemeral:2",
+      "stems": ["ephemeral", "ephemerals"]
+    },
+    "hwi": { "hw": "ephemeral" },
+    "fl": "noun",
+    "shortdef": ["something ephemeral"]
+  },
+  {
+    "meta": {
+      "id": "ephemerality",
+      "stems": ["ephemerality"]
+    },
+    "hwi": { "hw": "ephem*er*al*i*ty" },
+    "fl": "noun",
+    "shortdef": ["the quality or state of being ephemeral"]
+  }
+]
