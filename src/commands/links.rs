@@ -214,7 +214,7 @@ fn handler_path() -> Result<PathBuf> {
     let handler = exe.with_file_name(format!("{HANDLER_NAME}{}", std::env::consts::EXE_SUFFIX));
     if !handler.is_file() {
         bail!(
-            "{} was not found next to {}; reinstall with `cargo install --path .`",
+            "{} was not found next to {}; reinstall StealthLingo so both programs are in the same folder",
             handler.display(),
             exe.display()
         );

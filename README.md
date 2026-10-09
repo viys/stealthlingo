@@ -13,16 +13,38 @@ English is the only supported language in v0.1.
 
 ## Install
 
+Prebuilt programs for Windows, macOS and Linux are on the
+[Releases page](https://github.com/viys/stealthlingo/releases); no Rust needed.
+The installers put `stealthlingo` in `~/.cargo/bin` and add it to your `PATH`.
+
+Windows (PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/viys/stealthlingo/releases/latest/download/stealthlingo-installer.ps1 | iex"
+```
+
+macOS and Linux:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/viys/stealthlingo/releases/latest/download/stealthlingo-installer.sh | sh
+```
+
+Or download the archive for your system from the Releases page, unpack it and
+keep `stealthlingo` and `stealthlingo-link` in the same folder. On Linux, audio
+playback uses ALSA (`libasound2`), which desktop distributions ship by default.
+
+### From source
+
 Requires a recent stable Rust toolchain (1.88+) and a C compiler (SQLite is bundled).
 
 ```bash
+cargo install --git https://github.com/viys/stealthlingo
+# or, from a checkout
 cargo install --path .
-# or run from the checkout
 cargo run -- --help
 ```
 
-On Linux, audio playback needs the ALSA development package (e.g. `libasound2-dev`)
-at build time.
+On Linux, building needs the ALSA development package (e.g. `libasound2-dev`).
 
 ## Quick start
 
@@ -89,7 +111,7 @@ Definitions wrap to the terminal width with their continuation lines indented.
 ### Clickable lookups (Windows)
 
 ```bash
-stealthlingo links install   # once, after the first `cargo install`
+stealthlingo links install   # once, after installing
 ```
 
 This registers a `stealthlingo://` link handler for your user (no admin rights
@@ -226,6 +248,21 @@ The code is split into `dictionary` (Wiktionary client and parsers mapped to an
 (the full-screen interface, built with ratatui). Both interfaces drive the same
 `learning::session::Session`.
 Scheduling is a pure function with its own tests in `tests/scheduling_tests.rs`.
+
+### Releasing
+
+Releases are built by [dist](https://github.com/axodotdev/cargo-dist)
+(`dist-workspace.toml`, `.github/workflows/release.yml`). Bump `version` in
+`Cargo.toml`, commit, then push a matching tag:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+GitHub Actions then builds every platform and publishes the archives and
+installers as a GitHub Release. `dist plan` previews what will be built; after
+changing `dist-workspace.toml`, run `dist generate` to update the workflow.
 
 ## License
 
