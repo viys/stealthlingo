@@ -1,5 +1,7 @@
 # stealthlingo
 
+**English** | [简体中文](docs/i18n/README.zh-CN.md) | [繁體中文](docs/i18n/README.zh-TW.md) | [日本語](docs/i18n/README.ja.md) | [한국어](docs/i18n/README.ko.md) | [Español](docs/i18n/README.es.md) | [Português (Brasil)](docs/i18n/README.pt-BR.md) | [Русский](docs/i18n/README.ru.md) | [Tiếng Việt](docs/i18n/README.vi.md)
+
 A terminal-first language learning tool for stealthy study sessions.
 
 StealthLingo is a small Rust CLI for vocabulary practice in spare minutes: look a
