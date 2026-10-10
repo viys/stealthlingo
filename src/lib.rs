@@ -8,6 +8,7 @@ pub mod config;
 pub mod dictionary;
 pub mod error;
 pub mod learning;
+pub mod mcp;
 pub mod storage;
 pub mod time;
 pub mod tui;

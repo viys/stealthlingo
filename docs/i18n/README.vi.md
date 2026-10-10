@@ -4,9 +4,11 @@
 
 Công cụ học ngoại ngữ chạy trong terminal, giúp bạn học một cách kín đáo.
 
-StealthLingo là một công cụ dòng lệnh (CLI) nhỏ viết bằng Rust để luyện từ vựng trong những phút rảnh rỗi: tra một từ, lưu lại, rồi học các phiên 3–5 phút với thẻ ghi nhớ (flashcard), luyện chính tả hoặc nghe rồi viết chính tả. Dữ liệu từ điển lấy từ [Wiktionary](https://en.wiktionary.org/) tiếng Anh qua API chính thức của Wikimedia, không cần khóa API; lịch ôn tập, việc chấm đáp án và tiến độ học của bạn được lưu trong cơ sở dữ liệu SQLite trên máy, nên có thể ôn các từ đã lưu khi không có mạng.
+StealthLingo là một công cụ dòng lệnh (CLI) nhỏ viết bằng Rust để luyện từ vựng trong những phút rảnh rỗi: tra một từ, lưu lại, rồi luyện nó bằng thẻ ghi nhớ (flashcard), chính tả, điền chữ còn thiếu, nghe rồi viết chính tả hoặc kết hợp tất cả, hướng tới mục tiêu số từ mỗi ngày. Esc ẩn toàn bộ màn hình chỉ trong một lần nhấn. Dữ liệu từ điển lấy từ [Wiktionary](https://en.wiktionary.org/) tiếng Anh qua API chính thức của Wikimedia, không cần khóa API; lịch ôn tập, việc chấm đáp án và tiến độ học của bạn được lưu trong cơ sở dữ liệu SQLite trên máy, nên có thể ôn các từ đã lưu khi không có mạng. Tác tử AI cũng có thể thêm những từ bạn có thể chưa biết trong lúc bạn đọc hoặc viết mã (xem [Tác tử AI](#tác-tử-ai-mcp)).
 
 Phiên bản v0.1 chỉ hỗ trợ học tiếng Anh.
+
+![Màn hình chính của StealthLingo: mục tiêu hôm nay, các từ cần ôn và menu luyện tập](../images/home.png)
 
 ## Cài đặt
 
@@ -49,16 +51,25 @@ stealthlingo                                # mở ứng dụng toàn màn hình
 
 ## Giao diện toàn màn hình
 
-Trong terminal, `stealthlingo`, `study` và `review` sẽ mở giao diện toàn màn hình. Màn hình chính cho biết hôm nay cần ôn gì và một menu (`r` ôn tập, `s` thẻ ghi nhớ, `p` chính tả, `l` nghe, `/` tra từ, `w` danh sách từ, `t` thống kê, `q` thoát); cũng có thể dùng `↑`/`↓` (hoặc `k`/`j`) và `Enter`. Danh sách và các trang dài cuộn bằng cùng các phím đó.
+Trong terminal, `stealthlingo`, `study` và `review` sẽ mở giao diện toàn màn hình. Màn hình chính cho biết hôm nay cần ôn gì, tiến độ mục tiêu hằng ngày và một menu (`r` ôn tập, `s` thẻ ghi nhớ, `p` chính tả, `m` điền chữ còn thiếu, `l` nghe, `x` luyện tập hỗn hợp, `e` luyện lại từ sai, `/` tra từ, `w` danh sách từ, `t` thống kê, `c` thiết lập, `q` thoát); cũng có thể dùng `↑`/`↓` (hoặc `k`/`j`) và `Enter`. Danh sách và các trang dài cuộn bằng cùng các phím đó.
+
+![Esc ẩn ứng dụng và hiện shell; nhấn Esc lần nữa để quay lại](../images/boss-key.webp)
 
 - **Esc ẩn mọi thứ ngay lập tức** và hiện lại shell mà bạn đã dùng để mở chương trình; nhấn Esc lần nữa để quay lại. Đồng hồ của phiên học tạm dừng khi đang ẩn.
 - **Thẻ ghi nhớ** không cần Enter: `Space` hiện đáp án, `1`–`4` để tự chấm, `a` phát âm từ, `s` bỏ qua, `q` kết thúc phiên.
 - **Giọng đọc**: `a` phát giọng mặc định của bạn (thiết lập `accent`) trước; nhấn lại trên cùng một từ sẽ phát giọng còn lại đã được thu âm, và cứ thế luân phiên. Thanh dưới cho biết giọng nào sẽ phát tiếp theo, thanh trên cho biết giọng nào đang phát.
-- **Chính tả và nghe**: gõ từ rồi nhấn `Enter`. `Tab` hiện đáp án, `Ctrl+N` bỏ qua. Khi luyện nghe, nhấn `Enter` trên dòng trống để phát lại bản ghi âm, `Ctrl+R` để phát giọng còn lại. Khi trả lời sai, chương trình chỉ ra những chữ cái bị thừa hoặc thiếu.
-- **Danh sách từ**: `/` để lọc, `Enter` mở mục từ đã lưu (dùng được khi ngoại tuyến), `a` phát âm, `n` sửa ghi chú, `d` rồi `y` để xóa từ (lưu lại từ đó sẽ khôi phục tiến độ). `PgUp`/`PgDn` và `g`/`G` giúp di chuyển nhanh trong danh sách dài.
-- **Tra từ**: gõ một từ rồi nhấn `Enter`; sau đó `s` để lưu hoặc xóa từ, `Tab` chuyển giữa mục từ rút gọn và đầy đủ, `/` để tra từ mới, `q` để quay lại.
+- **Chính tả và nghe**: gõ từ rồi nhấn `Enter`. `Tab` hiện đáp án, `Ctrl+N` bỏ qua. Khi luyện nghe, nhấn `Enter` trên dòng trống để phát lại bản ghi âm, `Ctrl+R` để phát giọng còn lại. Khi trả lời sai, chương trình chỉ ra những chữ cái bị thừa hoặc thiếu. Câu hỏi điền chữ còn thiếu hiển thị từ với một số chữ cái bị che (`e _ h e _ e r _ l`); hãy gõ cả từ.
+- **Danh sách từ**: `/` để lọc theo chữ, `s` lần lượt chọn trạng thái, `p` lần lượt chọn từ loại, `u` chỉ hiện các từ đến hạn. `Enter` mở mục từ đã lưu (dùng được khi ngoại tuyến), `a` phát âm, `n` sửa ghi chú, `d` rồi `y` để xóa từ (lưu lại từ đó sẽ khôi phục tiến độ). `PgUp`/`PgDn` và `g`/`G` giúp di chuyển nhanh trong danh sách dài. Các từ do tác tử AI thêm được đánh dấu `agent`, và khi chọn, phần chi tiết bên dưới hiển thị lý do mà tác tử đưa ra.
+- **Thiết lập** (`c`): `←`/`→` thay đổi giá trị đang chọn, `PgUp`/`PgDn` mỗi lần 10, `Enter` để gõ số, `r` khôi phục giá trị mặc định, `R` khôi phục mọi thiết lập. Mỗi thay đổi được lưu ngay; giá trị nằm ngoài phạm vi cho phép sẽ không được lưu.
+- **Tra từ**: gõ một từ rồi nhấn `Enter`; sau đó `s` để lưu hoặc xóa từ, `a` để phát âm, `Tab` chuyển giữa mục từ rút gọn và đầy đủ, `/` để tra từ mới, `q` để quay lại.
 - `Ctrl+C` kết thúc phiên đang học, hủy bộ lọc hoặc ghi chú đang sửa, còn trong các trường hợp khác thì thoát chương trình. Mỗi câu trả lời được lưu ngay khi bạn trả lời.
-- Giao diện cần terminal tối thiểu 40×12 ký tự. Khi cửa sổ thấp, các khung sẽ thu nhỏ, phần tóm tắt ở màn hình chính gói gọn trong một dòng và menu có thể cuộn, để mục đang chọn và ô nhập đáp án luôn hiển thị.
+- Giao diện cần terminal tối thiểu 40×12 ký tự. Khi cửa sổ thấp, các khung sẽ thu nhỏ, phần tóm tắt ở màn hình chính gói gọn trong một dòng và menu chia thành hai cột (cửa sổ rộng) hoặc có thể cuộn, để mục đang chọn và ô nhập đáp án luôn hiển thị.
+
+![Thẻ ghi nhớ đã hiện nghĩa, đang chờ tự chấm](../images/flashcard.png)
+
+![Trả lời sai chính tả: chữ cái bị thiếu được đánh dấu trong đáp án](../images/spelling.png)
+
+![Tra từ: phát âm Anh, Mỹ và các nghĩa chính](../images/lookup.png)
 
 `--plain` (hoặc khi đầu vào/đầu ra không phải terminal, ví dụ khi dùng pipe) sẽ dùng chế độ hỏi từng dòng được mô tả bên dưới. `NO_COLOR` tắt màu.
 
@@ -70,17 +81,25 @@ Trong terminal, `stealthlingo`, `study` và `review` sẽ mở giao diện toàn
 | `lookup <WORD> [--all]` | Tra Wiktionary (làm mới bộ nhớ đệm; khi ngoại tuyến thì dùng bản đã lưu đệm) |
 | `add <WORD> [--note TEXT]` | Lưu một từ. Lưu hai lần cũng không sao; `--note` cập nhật ghi chú |
 | `remove <WORD>` | Xóa từ khỏi danh sách (dữ liệu từ điển đã lưu đệm và lịch sử trả lời vẫn được giữ) |
-| `words` | Liệt kê các từ đã lưu cùng trạng thái và thời điểm đến hạn |
-| `search <QUERY>` | Tìm trong các từ đã lưu và ghi chú |
-| `study [--mode memory\|spelling\|listening] [--minutes N] [--count N]` | Phiên học |
+| `words [--status S] [--pos P] [--due]` | Liệt kê các từ đã lưu cùng trạng thái, thời điểm đến hạn và người thêm, có thể lọc |
+| `search <QUERY> [--status S] [--pos P] [--due]` | Tìm trong các từ đã lưu và ghi chú |
+| `study [--mode memory\|spelling\|letters\|listening\|mixed] [--mistakes] [--minutes N] [--count N]` | Phiên học |
 | `review [--count N] [--minutes N]` | Ôn bằng thẻ ghi nhớ, chỉ với các từ đến hạn |
-| `stats` | Số từ đã lưu theo trạng thái, số từ đến hạn, số câu trả lời hôm nay và từ trước đến nay kèm tỉ lệ đúng, lần ôn tiếp theo |
+| `stats` | Số từ đã lưu theo trạng thái, số từ đến hạn, mục tiêu hằng ngày và 7 ngày gần nhất, số câu trả lời hôm nay và từ trước đến nay kèm tỉ lệ đúng, lần ôn tiếp theo |
 | `audio <WORD> [--accent uk\|us]` | Phát âm (mặc định theo thiết lập `accent`) |
-| `config` / `config set <KEY> <VALUE>` | Xem hoặc thay đổi thiết lập và vị trí dữ liệu |
+| `config` / `config set <KEY> <VALUE>` / `config reset [KEY]` | Xem, thay đổi hoặc khôi phục thiết lập; xem vị trí dữ liệu |
 | `links [status\|install\|uninstall]` | Ctrl+nhấp trong `lookup` để phát âm và thêm hoặc xóa từ (Windows) |
 | `export <PATH>` / `import <PATH>` | `.json` là bản sao lưu đầy đủ, `.csv` là danh sách từ |
+| `mcp` | Phục vụ tác tử AI qua MCP trên stdin/stdout; do ứng dụng khách của tác tử khởi chạy (xem phần Tác tử AI bên dưới) |
 
-Nếu không có `--minutes` hoặc `--count`, một phiên kéo dài `default_minutes` (5) phút.
+Nếu không có `--minutes` hoặc `--count`, một phiên kéo dài `default_minutes` (5) phút. Các phiên bắt đầu từ màn hình chính, hoặc bằng `stealthlingo --plain`, thì kéo dài đến khi đạt mục tiêu hằng ngày (xem [Mục tiêu hằng ngày](#mục-tiêu-hằng-ngày)).
+
+Các bộ lọc danh sách từ có thể kết hợp: `--status` là `new`, `learning`, `review` hoặc `mastered`; `--pos` khớp với phần đầu của từ loại (`adj`, `n`, `verb`); `--due` chỉ giữ các từ đã đến lúc ôn.
+
+```bash
+stealthlingo words --status learning --pos adj
+stealthlingo words --due
+```
 
 `lookup` hiển thị cách phát âm trên một dòng, giọng Anh (UK) trước rồi đến giọng Mỹ (US) (`Pronunciation: UK /njuː/ · US /nu/`), và cho biết giọng của bản ghi âm mà `audio` sẽ phát (hoặc gợi ý `--accent uk|us` khi có cả hai). Mặc định, sau đó chương trình liệt kê ba nghĩa đầu tiên của tối đa ba từ loại. `lookup --all` (hoặc `-a`) hiển thị mọi nghĩa kèm ví dụ, từ đồng nghĩa, từ trái nghĩa và nguồn. Các nghĩa được ngắt dòng theo độ rộng terminal, các dòng tiếp theo được thụt lề.
 
@@ -98,7 +117,11 @@ Các phím dưới đây dành cho chế độ hỏi từng dòng (`--plain`); g
 
 - **memory (ghi nhớ)**: xem từ, nhấn Enter để hiện nghĩa, rồi tự đánh giá: `1` Again (lại), `2` Hard (khó), `3` Good (tốt), `4` Easy (dễ). Nhấn `a` để nghe từ.
 - **spelling (chính tả)**: đọc định nghĩa (bản thân từ đó được che trong định nghĩa và ví dụ) rồi gõ từ. `?` để bỏ cuộc và xem đáp án.
+- **letters (điền chữ còn thiếu)**: giống chính tả, nhưng khoảng một nửa số chữ cái được hiển thị (`e _ h e _ e r _ l`). Mỗi từ luôn bị che ở cùng các vị trí. Câu trả lời được tính là luyện chính tả.
 - **listening (nghe)**: nghe phát âm rồi gõ từ. `r` để phát lại. Chỉ dùng các từ có âm thanh phát âm.
+- **mixed (hỗn hợp)**: các từ chưa từng học bắt đầu bằng thẻ ghi nhớ; các từ còn lại luân phiên giữa thẻ ghi nhớ, chính tả và (khi có bản ghi âm) nghe.
+
+`--mistakes` luyện các từ bạn trả lời sai trong 30 ngày gần nhất, hoặc đã quên sau khi học thuộc, bắt đầu từ lỗi gần nhất, bất kể đã đến hạn hay chưa. Tùy chọn này dùng được với mọi chế độ; trên màn hình chính, `e` dùng luyện tập hỗn hợp.
 
 Ở mọi chế độ, `s` bỏ qua từ hiện tại mà không ghi nhận câu trả lời, `q` kết thúc phiên. Ctrl+C cũng kết thúc phiên; nhấn Ctrl+C lần thứ hai sẽ thoát ngay. Mỗi câu trả lời đã gửi được lưu ngay lập tức, nên thoát giữa chừng không làm mất phần đã làm, và câu hỏi chưa trả lời không bao giờ bị tính là sai.
 
@@ -115,22 +138,71 @@ Một thuật toán SM-2 giản lược quyết định khi nào một từ quay
 
 Trong luyện chính tả và nghe, trả lời đúng được tính là Good, sai được tính là Again. Từ trả lời sai sẽ xuất hiện thêm một lần nữa ở cuối chính phiên đó. Các từ đến hạn ôn luôn được ưu tiên trước từ mới, và mỗi ngày chỉ đưa vào tối đa `daily_new_limit` (mặc định 10) từ chưa từng học. Các từ có khoảng cách từ 21 ngày trở lên được hiển thị là `mastered` (đã thuộc).
 
+### Mục tiêu hằng ngày
+
+`daily_goal` (mặc định 10) là số từ khác nhau cần luyện mỗi ngày; trả lời lại cùng một từ không được tính hai lần. Màn hình chính, trang thống kê và `stats` hiển thị tiến độ hôm nay, và `stats` còn hiển thị 7 ngày gần nhất. Cho đến khi đạt mục tiêu, các phiên bắt đầu từ màn hình chính (hoặc bằng `stealthlingo --plain`) sẽ kết thúc khi đạt mục tiêu thay vì sau `default_minutes`; nếu hết từ trước, phiên sẽ cho biết còn thiếu bao nhiêu từ. `--minutes` hoặc `--count` được chỉ định rõ luôn được ưu tiên. `0` tắt mục tiêu.
+
 ## Cấu hình
 
+Thay đổi thiết lập trong màn hình thiết lập (`c` trên màn hình chính) hoặc bằng `config`:
+
 ```bash
+stealthlingo config set daily_goal 20
 stealthlingo config set daily_new_limit 15
 stealthlingo config set default_minutes 3
-stealthlingo config set http_timeout_secs 10
 stealthlingo config set accent us        # ưu tiên phát bản ghi âm giọng Mỹ (mặc định: uk)
+stealthlingo config reset daily_goal     # trở về giá trị mặc định
+stealthlingo config reset                # mọi thiết lập, sau khi xác nhận (--yes bỏ qua xác nhận)
 ```
 
-Từ chỉ có bản ghi âm một giọng thì luôn phát bản ghi âm đó.
+| Khóa | Mặc định | Phạm vi | Ý nghĩa |
+|---|---|---|---|
+| `daily_goal` | 10 | 0–500, 0 = tắt | Số từ khác nhau cần luyện mỗi ngày |
+| `daily_new_limit` | 10 | 0–200, 0 = chỉ ôn tập | Số từ chưa từng học được đưa vào mỗi ngày |
+| `default_minutes` | 5 | 1–120 | Độ dài phiên khi không có `--minutes` hoặc `--count` |
+| `accent` | uk | uk / us | Giọng được phát trước |
+| `mcp_daily_add_limit` | 30 | 0–200, 0 = tắt | Số từ các tác tử AI được thêm mỗi ngày qua MCP |
+| `http_timeout_secs` | 10 | 1–120 | Thời gian chờ mạng |
+
+`config` liệt kê từng giá trị cùng giá trị mặc định và phạm vi. Nếu `config.json` chứa giá trị ngoài phạm vi, StealthLingo sẽ cảnh báo và dùng giá trị hợp lệ gần nhất mà không ghi đè tệp. Từ chỉ có bản ghi âm một giọng thì luôn phát bản ghi âm đó.
 
 ### Từ điển
 
 StealthLingo dùng API Wiktionary chính thức của Wikimedia: định nghĩa và ví dụ lấy từ REST API, còn IPA (gắn nhãn theo giọng), từ đồng nghĩa, từ trái nghĩa và bản ghi âm trên Wikimedia Commons (OGG) lấy từ mã nguồn của trang. Khi dạng bạn gõ khác với mục từ trong từ điển (`Ephemeral` và `ephemeral`), dạng bạn gõ sẽ được ghi nhớ, nên `add` và `remove` đều chỉ cùng một từ đã lưu.
 
 Các bản phát triển trước khi phát hành v0.1.0 còn có thể dùng Free Dictionary API hoặc Merriam-Webster. Những từ được lưu đệm từ các nguồn đó vẫn đọc được khi ngoại tuyến, và sẽ được thay bằng dữ liệu Wiktionary ở lần tra tiếp theo (tiến độ học và ghi chú được giữ nguyên). Các thiết lập cũ của chúng trong `config.json` sẽ bị bỏ qua.
+
+## Tác tử AI (MCP)
+
+`stealthlingo mcp` chạy một máy chủ [Model Context Protocol](https://modelcontextprotocol.io) trên stdin/stdout, để tác tử AI (Cursor, Claude Desktop hoặc ứng dụng khách MCP khác) có thể tra từ và thêm những từ bạn có thể chưa biết vào danh sách học trong lúc bạn đọc hoặc viết mã. Bản thân StealthLingo không bao giờ gọi mô hình AI. Thêm nó vào cấu hình MCP của ứng dụng khách (với Cursor là `~/.cursor/mcp.json`, hoặc `.cursor/mcp.json` trong một dự án):
+
+```json
+{
+  "mcpServers": {
+    "stealthlingo": {
+      "command": "stealthlingo",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Nếu `stealthlingo` không có trong `PATH`, hãy ghi đường dẫn đầy đủ của tệp thực thi vào `command`. Sau đó hãy nhờ tác tử, ví dụ, thêm những từ trên trang này mà bạn có thể chưa biết.
+
+| Công cụ | Chức năng |
+|---|---|
+| `get_study_status` | Số từ đã lưu, đến hạn và chưa bắt đầu học, tiến độ mục tiêu và độ chính xác hôm nay, và số từ các tác tử còn được thêm hôm nay |
+| `list_words` | Các từ đã lưu cùng trạng thái, thời điểm đến hạn, âm thanh, số lần quên và định nghĩa ngắn; `query`, `status` và `limit` thu hẹp danh sách. Ghi chú không bao giờ được chia sẻ |
+| `lookup_word` | Mục Wiktionary của một từ (ưu tiên bộ nhớ đệm), không lưu từ đó |
+| `add_words` | Lưu tối đa 20 từ mỗi lần gọi, mỗi từ có thể kèm `reason` tùy chọn; báo kết quả cho từng từ |
+
+Tác tử chỉ chọn từ:
+
+- Định nghĩa, ví dụ và phát âm chỉ lấy từ Wiktionary. Tác tử có thể cho biết từ xuất hiện ở đâu (`reason`), nhưng không thể viết định nghĩa, bản dịch hay ghi chú của bạn. Những từ Wiktionary không có sẽ không được thêm.
+- Không có công cụ nào để xóa từ, thay đổi thiết lập hay ghi lại câu trả lời.
+- Những từ bạn đã xóa (bằng `remove`, `d` trong danh sách từ, hoặc một liên kết) sẽ không bao giờ bị tác tử thêm lại; nếu bạn tự lưu lại, từ đó sẽ dùng được trở lại.
+- Mỗi ngày tác tử chỉ được thêm tối đa `mcp_daily_add_limit` (mặc định 30) từ, và xóa một từ không trả lại lượt. `0` tắt việc thêm từ. Thay đổi có hiệu lực từ lần gọi tiếp theo, không cần khởi động lại ứng dụng khách.
+- Các từ do tác tử thêm được học như mọi từ khác. Danh sách từ đánh dấu chúng là `agent` và hiển thị lý do của tác tử; `words` cho biết ai đã thêm từng từ ở cột `BY`. Bản sao lưu JSON giữ cả hai thông tin này, cùng các từ bạn đã xóa.
 
 ## Thư mục dữ liệu
 
@@ -160,6 +232,7 @@ Khi cùng một từ có ở cả hai phía trong lần nhập JSON, tiến đ�
 - Học, ôn tập, `words`, `search` và `stats` không bao giờ dùng mạng.
 - `lookup` làm mới dữ liệu từ Wiktionary, và hiển thị bản lưu đệm nếu không kết nối được.
 - `add` và `audio` dùng bộ nhớ đệm khi có thể và chỉ kết nối mạng với từ mới.
+- Trong `mcp`, `get_study_status` và `list_words` không bao giờ kết nối mạng; `lookup_word` và `add_words` chỉ kết nối mạng với từ chưa có trong bộ nhớ đệm.
 - Âm thanh phát âm được tải về ở lần phát đầu tiên và được dùng lại sau đó.
 
 ## Về dữ liệu từ điển

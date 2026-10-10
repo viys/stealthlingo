@@ -1,9 +1,9 @@
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use stealthlingo::cli::StudyMode;
 use stealthlingo::dictionary::{self, legacy, wiktionary, Entry};
-use stealthlingo::learning::session::build_queue;
+use stealthlingo::learning::session::{build_mistake_queue, build_queue};
 use stealthlingo::learning::{schedule, Grade, PracticeMode, Status};
-use stealthlingo::storage::{AddOutcome, Database, NewAttempt};
+use stealthlingo::storage::{AddOutcome, Database, NewAttempt, WordFilter};
 
 const HELLO: &str = include_str!("fixtures/hello.json");
 const SPARSE: &str = include_str!("fixtures/sparse.json");
@@ -120,8 +120,8 @@ fn saving_is_idempotent_and_updates_notes() {
 fn remove_keeps_cache_but_drops_from_list() {
     let db = Database::open_in_memory().unwrap();
     save(&db, "hello", HELLO, t0());
-    assert!(db.remove_from_collection("hello").unwrap());
-    assert!(!db.remove_from_collection("hello").unwrap());
+    assert!(db.remove_from_collection("hello", t0()).unwrap());
+    assert!(!db.remove_from_collection("hello", t0()).unwrap());
     assert_eq!(db.collection_size().unwrap(), 0);
     let cached = db.find_cached("hello").unwrap().unwrap();
     assert!(!cached.in_collection);
@@ -165,7 +165,7 @@ fn archived_words_come_back_with_their_progress() {
     assert_eq!(progress(&db).4.as_deref(), Some("hi"));
 
     // `remove` (the command) starts the word over.
-    assert!(db.remove_from_collection("hello").unwrap());
+    assert!(db.remove_from_collection("hello", t0()).unwrap());
     assert_eq!(
         db.add_to_collection(id, None, t0()).unwrap(),
         AddOutcome::Added
@@ -260,6 +260,41 @@ fn queue_respects_daily_new_limit_and_audio() {
 }
 
 #[test]
+fn mistake_queue_puts_the_latest_mistakes_first() {
+    let mut db = Database::open_in_memory().unwrap();
+    let ids: Vec<i64> = (0..4)
+        .map(|i| {
+            let word = format!("word{i}");
+            save(&db, &word, &raw_for(&word), t0())
+        })
+        .collect();
+    let old = t0() - Duration::days(40);
+    // word0: missed long ago, then learned and forgotten (a lapse).
+    answer(&mut db, ids[0], Grade::Good, old);
+    answer(&mut db, ids[0], Grade::Again, old + Duration::days(1));
+    // word1: missed yesterday; word2: missed an hour ago; word3: never missed.
+    answer(&mut db, ids[1], Grade::Again, t0() - Duration::days(1));
+    answer(&mut db, ids[2], Grade::Again, t0() - Duration::hours(1));
+    answer(&mut db, ids[2], Grade::Good, t0() - Duration::minutes(30));
+    answer(&mut db, ids[3], Grade::Good, t0() - Duration::hours(2));
+
+    let queue = build_mistake_queue(&db, StudyMode::Spelling, t0()).unwrap();
+    let words: Vec<i64> = queue.iter().map(|i| i.word_id).collect();
+    assert_eq!(words, vec![ids[2], ids[1], ids[0]]);
+    assert!(build_mistake_queue(&db, StudyMode::Listening, t0())
+        .unwrap()
+        .is_empty());
+
+    let today = db.words_practised_since(t0() - Duration::hours(3)).unwrap();
+    assert_eq!(today.len(), 2);
+    assert_eq!(
+        db.count_words_practised(t0() - Duration::days(2), t0() - Duration::hours(3))
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
 fn attempts_are_recorded_and_counted_in_stats() {
     let mut db = Database::open_in_memory().unwrap();
     let hello = save(&db, "hello", HELLO, t0());
@@ -278,10 +313,114 @@ fn attempts_are_recorded_and_counted_in_stats() {
     assert_eq!(stats.total_attempts, 3);
     assert_eq!(stats.total_correct, 2);
     assert_eq!(stats.new_words_today, 1);
+    assert_eq!(stats.words_today, 2);
     assert_eq!(stats.due_now, 0);
     assert!(stats.status_counts.contains(&(Status::Learning, 2)));
     assert!(stats.status_counts.contains(&(Status::New, 0)));
     assert_eq!(stats.next_due, Some(t0() + Duration::minutes(10)));
+}
+
+#[test]
+fn upgrading_to_word_origins_keeps_progress_and_dismisses_archived_words() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db.sqlite");
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        for sql in [
+            include_str!("../migrations/001_initial.sql"),
+            include_str!("../migrations/002_dictionary_sources.sql"),
+            include_str!("../migrations/003_word_aliases.sql"),
+            include_str!("../migrations/004_archived_words.sql"),
+        ] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 4).unwrap();
+        for (id, word) in [(1, "kept"), (2, "gone")] {
+            conn.execute(
+                "INSERT INTO words (id, headword_normalized, display_word, raw_response_json,
+                                    source_fetched_at, created_at)
+                 VALUES (?1, ?2, ?2, ?3, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                rusqlite::params![id, word, raw_for(word)],
+            )
+            .unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO user_words (word_id, status, personal_note, due_at, repetitions, added_at)
+             VALUES (1, 'review', 'note', '2026-02-01T00:00:00Z', 3, '2026-01-01T00:00:00Z');
+             INSERT INTO archived_user_words (word_id, status, due_at, interval_days, repetitions,
+                                              ease_factor, lapses, added_at, archived_at)
+             VALUES (2, 'learning', '2026-02-01T00:00:00Z', 1, 1, 2.5, 0,
+                     '2026-01-01T00:00:00Z', '2026-01-05T00:00:00Z');",
+        )
+        .unwrap();
+    }
+    let db = Database::open(&path).unwrap();
+    assert_eq!(
+        db.schema_version().unwrap(),
+        Database::latest_schema_version()
+    );
+    let words = db.list_words(None).unwrap();
+    assert_eq!(words.len(), 1);
+    assert_eq!(words[0].status, Status::Review);
+    assert_eq!(words[0].repetitions, 3);
+    assert_eq!(words[0].note.as_deref(), Some("note"));
+    assert!(!words[0].added_by_agent);
+    assert!(db.is_dismissed("gone").unwrap());
+    assert!(!db.is_dismissed("kept").unwrap());
+
+    // Saving the archived word again still restores its progress.
+    assert_eq!(
+        db.add_to_collection(2, None, t0()).unwrap(),
+        AddOutcome::Restored
+    );
+    assert!(!db.is_dismissed("gone").unwrap());
+}
+
+#[test]
+fn word_filters_narrow_by_status_part_of_speech_and_due() {
+    let mut db = Database::open_in_memory().unwrap();
+    let cat = save(&db, "cat", &raw_for("cat"), t0());
+    let run_raw = raw_for("run").replace("noun", "verb");
+    let run = save(&db, "run", &run_raw, t0());
+    save(&db, "dog", &raw_for("dog"), t0());
+    answer(&mut db, cat, Grade::Again, t0());
+    answer(&mut db, run, Grade::Good, t0() - Duration::days(1));
+
+    let words = db.list_words(None).unwrap();
+    let names = |filter: &WordFilter, now| {
+        let mut names: Vec<_> = words
+            .iter()
+            .filter(|w| filter.matches(w, now))
+            .map(|w| w.display_word.as_str())
+            .collect();
+        names.sort();
+        names
+    };
+    let now = t0() + Duration::hours(1);
+    assert_eq!(names(&WordFilter::default(), now), ["cat", "dog", "run"]);
+    let learning = WordFilter {
+        status: Some(Status::Learning),
+        ..WordFilter::default()
+    };
+    assert_eq!(names(&learning, now), ["cat", "run"]);
+    let nouns = WordFilter {
+        part_of_speech: Some("N".into()),
+        ..WordFilter::default()
+    };
+    assert_eq!(names(&nouns, now), ["cat", "dog"]);
+    let due = WordFilter {
+        due: true,
+        ..WordFilter::default()
+    };
+    assert_eq!(names(&due, now), ["cat", "run"], "new words are never due");
+    assert_eq!(names(&due, t0()), ["run"]);
+    let due_verbs = WordFilter {
+        part_of_speech: Some("verb".into()),
+        due: true,
+        ..WordFilter::default()
+    };
+    assert_eq!(due_verbs.describe(), "verb · due");
+    assert_eq!(names(&due_verbs, now), ["run"]);
 }
 
 #[test]
@@ -369,8 +508,8 @@ fn import_rejects_foreign_or_invalid_backups() {
 #[test]
 fn schema_is_migrated_to_latest_version() {
     let db = Database::open_in_memory().unwrap();
-    assert_eq!(db.schema_version().unwrap(), 4);
-    assert_eq!(Database::latest_schema_version(), 4);
+    assert_eq!(db.schema_version().unwrap(), 5);
+    assert_eq!(Database::latest_schema_version(), 5);
 }
 
 #[test]
@@ -395,14 +534,14 @@ fn aliases_resolve_to_the_dictionary_headword() {
         .unwrap();
     assert_eq!(db.find_cached("ran").unwrap().unwrap().id, ran);
     assert!(
-        !db.remove_from_collection("ran").unwrap(),
+        !db.remove_from_collection("ran", t0()).unwrap(),
         "ran is not saved"
     );
 
     let db = Database::open_in_memory().unwrap();
     let run = save(&db, "run", &raw_for("run"), t0());
     db.add_alias("ran", run).unwrap();
-    assert!(db.remove_from_collection("ran").unwrap());
+    assert!(db.remove_from_collection("ran", t0()).unwrap());
     assert_eq!(db.collection_size().unwrap(), 0);
 }
 

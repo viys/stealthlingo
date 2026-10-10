@@ -26,6 +26,8 @@ use crate::tui;
 pub struct Context {
     pub paths: Paths,
     pub config: Config,
+    /// Values in `config.json` that could not be used as written.
+    pub config_warnings: Vec<String>,
     pub db: Database,
     pub endpoints: Endpoints,
 }
@@ -37,25 +39,51 @@ impl Context {
 
     pub fn load_from(paths: Paths) -> Result<Self> {
         paths.ensure_exists()?;
-        let config = Config::load(&paths.config_file())?;
+        let (config, config_warnings) = Config::load(&paths.config_file())?;
         let db = Database::open(&paths.database())?;
         Ok(Self {
             paths,
             config,
+            config_warnings,
             db,
             endpoints: Endpoints::default(),
         })
     }
 
-    fn timeout(&self) -> Duration {
+    /// Re-reads `config.json`, so changes made elsewhere apply without a
+    /// restart. Returns warnings that were not reported before. On error the
+    /// current settings stay in effect.
+    pub fn reload_config(&mut self) -> Result<Vec<String>> {
+        let (config, warnings) = Config::load(&self.paths.config_file())?;
+        let fresh = warnings
+            .iter()
+            .filter(|w| !self.config_warnings.contains(w))
+            .cloned()
+            .collect();
+        self.config = config;
+        self.config_warnings = warnings;
+        Ok(fresh)
+    }
+
+    /// Saves the settings in memory, which also writes back values that were
+    /// corrected when the file was loaded.
+    pub fn save_config(&mut self) -> Result<()> {
+        self.config.save(&self.paths.config_file())?;
+        self.config_warnings.clear();
+        Ok(())
+    }
+
+    pub fn timeout(&self) -> Duration {
         Duration::from_secs(self.config.http_timeout_secs.max(1))
     }
 
     pub fn dictionary(&self) -> Result<DictionaryClient> {
-        Ok(DictionaryClient::new(
-            self.endpoints.clone(),
-            self.timeout(),
-        )?)
+        self.dictionary_within(self.timeout())
+    }
+
+    /// A dictionary client whose lookups give up after `timeout` in total.
+    pub fn dictionary_within(&self, timeout: Duration) -> Result<DictionaryClient> {
+        Ok(DictionaryClient::new(self.endpoints.clone(), timeout)?)
     }
 
     pub fn audio_player(&self) -> Result<AudioPlayer> {
@@ -67,6 +95,16 @@ pub fn run(cli: Cli) -> Result<()> {
     crate::learning::session::install_interrupt_handler();
     let mut ctx = Context::load()?;
     let full_screen = !cli.plain && tui::available();
+    let opens_tui = full_screen
+        && matches!(
+            cli.command,
+            None | Some(Command::Study(_)) | Some(Command::Review { .. })
+        );
+    if !opens_tui {
+        for warning in &ctx.config_warnings {
+            eprintln!("Warning: {warning}");
+        }
+    }
     match cli.command {
         None if full_screen => tui::run(&mut ctx, tui::Start::Home),
         Some(Command::Study(args)) if full_screen => tui::run(
@@ -88,8 +126,10 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Some(Command::Add { word, note }) => add::run(&ctx, &word, note.as_deref()),
         Some(Command::Remove { word }) => words::remove(&ctx, &word),
-        Some(Command::Words) => words::list(&ctx, None),
-        Some(Command::Search { query }) => words::list(&ctx, Some(&query)),
+        Some(Command::Words { filter }) => words::list(&ctx, None, &filter.filter()),
+        Some(Command::Search { query, filter }) => {
+            words::list(&ctx, Some(&query), &filter.filter())
+        }
         Some(Command::Study(args)) => study::run(&mut ctx, &args),
         Some(Command::Review { count, minutes }) => review::run(&mut ctx, count, minutes),
         Some(Command::Stats) => stats::run(&ctx),
@@ -103,6 +143,7 @@ pub fn run(cli: Cli) -> Result<()> {
         },
         Some(Command::Export { path }) => io::export(&ctx, &path),
         Some(Command::Import { path }) => io::import(&mut ctx, &path),
+        Some(Command::Mcp) => crate::mcp::run(&mut ctx),
     }
 }
 
@@ -119,11 +160,12 @@ fn default_entry(ctx: &mut Context) -> Result<()> {
         println!("Run `stealthlingo --help` for all commands.");
         return Ok(());
     }
-    if ctx.db.count_due(Utc::now())? > 0 {
-        review::run(ctx, None, None)
+    let request = if ctx.db.count_due(Utc::now())? > 0 {
+        study::SessionRequest::review(None, None)
     } else {
-        study::run(ctx, &StudyArgs::default())
-    }
+        study::SessionRequest::study(&StudyArgs::default())
+    };
+    study::start_session(ctx, &request.toward_goal())
 }
 
 fn require_word(word: &str) -> Result<String> {
@@ -160,42 +202,50 @@ fn offline_error(word: &str, err: DictionaryError) -> anyhow::Error {
 pub fn fetch_word(ctx: &Context, word: &str) -> Result<(CachedWord, Freshness)> {
     let headword = require_word(word)?;
     match ctx.dictionary()?.fetch(word) {
-        Ok(fetched) => {
-            let key = Some(normalize_headword(&fetched.entry.word))
-                .filter(|k| !k.is_empty())
-                .unwrap_or_else(|| headword.clone());
-            let source = if fetched.complete {
-                dictionary::SOURCE
-            } else {
-                // Keep a complete copy rather than replace it with one that
-                // lacks pronunciations and audio.
-                if let Some(cached) = ctx
-                    .db
-                    .find_cached(&key)?
-                    .filter(|c| c.source == dictionary::SOURCE)
-                {
-                    ctx.db.add_alias(&headword, cached.id)?;
-                    return Ok((cached, Freshness::Cached));
-                }
-                dictionary::PARTIAL_SOURCE
-            };
-            let id =
-                ctx.db
-                    .cache_word(&key, &fetched.entry, &fetched.raw_json, source, Utc::now())?;
-            // The dictionary may answer with another headword ("ran" -> "run").
-            ctx.db.add_alias(&headword, id)?;
-            let cached = ctx
-                .db
-                .find_cached(&key)?
-                .ok_or_else(|| anyhow!("the dictionary entry was not saved"))?;
-            Ok((cached, Freshness::Fresh))
-        }
+        Ok(fetched) => store_fetched(ctx, word, fetched),
         Err(err) if err.is_transient() => match ctx.db.find_cached(&headword)? {
             Some(cached) => Ok((cached, Freshness::Fallback(err))),
-            None => Err(offline_error(word.trim(), err)),
+            None => Err(offline_error(&dictionary::clean_word(word), err)),
         },
         Err(err) => Err(err.into()),
     }
+}
+
+/// Caches a dictionary answer for the typed `word` and returns the stored entry.
+pub fn store_fetched(
+    ctx: &Context,
+    word: &str,
+    fetched: dictionary::Fetched,
+) -> Result<(CachedWord, Freshness)> {
+    let headword = require_word(word)?;
+    let key = Some(normalize_headword(&fetched.entry.word))
+        .filter(|k| !k.is_empty())
+        .unwrap_or_else(|| headword.clone());
+    let source = if fetched.complete {
+        dictionary::SOURCE
+    } else {
+        // Keep a complete copy rather than replace it with one that
+        // lacks pronunciations and audio.
+        if let Some(cached) = ctx
+            .db
+            .find_cached(&key)?
+            .filter(|c| c.source == dictionary::SOURCE)
+        {
+            ctx.db.add_alias(&headword, cached.id)?;
+            return Ok((cached, Freshness::Cached));
+        }
+        dictionary::PARTIAL_SOURCE
+    };
+    let id = ctx
+        .db
+        .cache_word(&key, &fetched.entry, &fetched.raw_json, source, Utc::now())?;
+    // The dictionary may answer with another headword ("ran" -> "run").
+    ctx.db.add_alias(&headword, id)?;
+    let cached = ctx
+        .db
+        .find_cached(&key)?
+        .ok_or_else(|| anyhow!("the dictionary entry was not saved"))?;
+    Ok((cached, Freshness::Fresh))
 }
 
 /// Returns cached data when available and only goes to the network otherwise.

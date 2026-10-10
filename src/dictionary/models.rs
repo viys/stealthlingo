@@ -38,12 +38,38 @@ pub struct Definition {
     pub example: Option<String>,
 }
 
-/// Canonical key used to identify a headword locally.
-pub fn normalize_headword(word: &str) -> String {
+/// Characters that take up no space but come along when a word is copied
+/// from a web page or document; terminals often draw them as a blank.
+fn is_invisible(c: char) -> bool {
+    (c.is_control() && !c.is_whitespace())
+        || matches!(
+            c,
+            '\u{00AD}'
+                | '\u{180E}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{FEFF}'
+        )
+}
+
+/// A word as the user entered it, without invisible characters and with
+/// surrounding whitespace removed and inner runs collapsed to one space.
+pub fn clean_word(word: &str) -> String {
     word.split_whitespace()
+        .map(|part| {
+            part.chars()
+                .filter(|c| !is_invisible(*c))
+                .collect::<String>()
+        })
+        .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
-        .to_lowercase()
+}
+
+/// Canonical key used to identify a headword locally.
+pub fn normalize_headword(word: &str) -> String {
+    clean_word(word).to_lowercase()
 }
 
 /// Turns protocol-relative audio links (`//host/x.mp3`) into HTTPS and drops blanks.

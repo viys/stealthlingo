@@ -6,4 +6,6 @@ pub mod repository;
 
 pub use backup::{Backup, ImportSummary};
 pub use database::Database;
-pub use repository::{AddOutcome, CachedWord, NewAttempt, Stats, StudyItem, WordSummary};
+pub use repository::{
+    AddOutcome, AgentAddOutcome, CachedWord, NewAttempt, Stats, StudyItem, WordFilter, WordSummary,
+};

@@ -2,6 +2,9 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
+use crate::learning::Status;
+use crate::storage::WordFilter;
+
 /// Quick, low-distraction vocabulary practice in your terminal.
 ///
 /// Run without a command to open the full-screen app (in a terminal), or to
@@ -35,9 +38,16 @@ pub enum Command {
     /// Remove a word from your study list
     Remove { word: String },
     /// List saved words
-    Words,
+    Words {
+        #[command(flatten)]
+        filter: WordFilterArgs,
+    },
     /// Search saved words and personal notes
-    Search { query: String },
+    Search {
+        query: String,
+        #[command(flatten)]
+        filter: WordFilterArgs,
+    },
     /// Start a study session
     Study(StudyArgs),
     /// Review words that are due now
@@ -72,6 +82,55 @@ pub enum Command {
     Export { path: PathBuf },
     /// Import words (.json backup or .csv word list with a "word" column)
     Import { path: PathBuf },
+    /// Serve AI agents over MCP on stdin/stdout (started by the agent's client)
+    Mcp,
+}
+
+#[derive(Debug, Clone, Default, clap::Args)]
+pub struct WordFilterArgs {
+    /// Only words at this stage of learning
+    #[arg(long, value_enum)]
+    pub status: Option<StatusArg>,
+    /// Only words with this part of speech; the start is enough (adj, n, v)
+    #[arg(long)]
+    pub pos: Option<String>,
+    /// Only words due for review now
+    #[arg(long)]
+    pub due: bool,
+}
+
+impl WordFilterArgs {
+    pub fn filter(&self) -> WordFilter {
+        WordFilter {
+            status: self.status.map(StatusArg::status),
+            part_of_speech: self
+                .pos
+                .as_deref()
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string),
+            due: self.due,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum StatusArg {
+    New,
+    Learning,
+    Review,
+    Mastered,
+}
+
+impl StatusArg {
+    pub fn status(self) -> Status {
+        match self {
+            Self::New => Status::New,
+            Self::Learning => Status::Learning,
+            Self::Review => Status::Review,
+            Self::Mastered => Status::Mastered,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, clap::Args)]
@@ -85,6 +144,10 @@ pub struct StudyArgs {
     /// Stop after this many answers
     #[arg(long, short)]
     pub count: Option<usize>,
+    /// Practise words you got wrong recently, most recent mistakes first,
+    /// whether or not they are due
+    #[arg(long)]
+    pub mistakes: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
@@ -94,8 +157,12 @@ pub enum StudyMode {
     Memory,
     /// Read the definition, type the word
     Spelling,
+    /// Read the definition and part of the word (e _ h e _ e r _ l), type the word
+    Letters,
     /// Hear the pronunciation, type the word
     Listening,
+    /// A mix of the other modes, chosen per word
+    Mixed,
 }
 
 #[derive(Debug, Subcommand)]
@@ -117,4 +184,12 @@ pub enum ConfigAction {
     Show,
     /// Change a configuration value
     Set { key: String, value: String },
+    /// Restore one setting, or all of them, to the default
+    Reset {
+        /// Setting to restore; without it, every setting
+        key: Option<String>,
+        /// Reset everything without asking for confirmation
+        #[arg(long, short)]
+        yes: bool,
+    },
 }

@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use reqwest::blocking::Client;
 use reqwest::Url;
 
-use super::models::Entry;
+use super::models::{clean_word, Entry};
 use super::wiktionary;
 use crate::error::DictionaryError;
 
@@ -74,7 +74,7 @@ impl DictionaryClient {
     pub fn entry_url(&self, word: &str) -> Result<Url, DictionaryError> {
         with_segment(
             &self.endpoints.rest_base,
-            &wiktionary::page_title(word.trim()),
+            &wiktionary::page_title(&clean_word(word)),
         )
     }
 
@@ -104,7 +104,7 @@ impl DictionaryClient {
     /// fails or runs out of time the definitions are still returned.
     pub fn fetch(&self, word: &str) -> Result<Fetched, DictionaryError> {
         let deadline = Instant::now() + self.timeout;
-        let typed = word.trim().to_string();
+        let typed = clean_word(word);
         let mut candidates = vec![typed.clone()];
         let lower = typed.to_lowercase();
         if lower != typed {

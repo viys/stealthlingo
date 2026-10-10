@@ -2,9 +2,10 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 
 use chrono::Utc;
+use stealthlingo::cli::ConfigAction;
 use stealthlingo::commands::links::{self, LinkAction};
-use stealthlingo::commands::{cached_or_fetch, fetch_word, Context, Freshness};
-use stealthlingo::config::Paths;
+use stealthlingo::commands::{cached_or_fetch, config, fetch_word, Context, Freshness};
+use stealthlingo::config::{Config, Paths};
 use stealthlingo::dictionary::{self, legacy, wiktionary, Endpoints};
 use stealthlingo::storage::AddOutcome;
 
@@ -196,6 +197,50 @@ fn old_entries_missing_from_wiktionary_are_not_looked_up_again() {
     assert_eq!(cached.entry, legacy::parse("hello", HELLO).unwrap());
     let cached = ctx.db.find_cached("hello").unwrap().unwrap();
     assert_eq!(cached.source, dictionary::SOURCE);
+}
+
+#[test]
+fn config_reset_restores_defaults_and_changes_are_picked_up_on_reload() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = offline_context(&dir);
+    let path = ctx.paths.config_file();
+    std::fs::write(&path, r#"{"daily_goal": 900, "daily_new_limit": 3}"#).unwrap();
+    let warnings = ctx.reload_config().unwrap();
+    assert_eq!(ctx.config.daily_goal, 500);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    // The file keeps the user's value until a setting is changed.
+    assert!(std::fs::read_to_string(&path).unwrap().contains("900"));
+
+    let set = |key: &str, value: &str| ConfigAction::Set {
+        key: key.to_string(),
+        value: value.to_string(),
+    };
+    config::run(&mut ctx, Some(set("daily_goal", "20"))).unwrap();
+    assert!(config::run(&mut ctx, Some(set("daily_goal", "501"))).is_err());
+    let saved = std::fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("\"daily_goal\": 20"), "{saved}");
+    assert!(saved.contains("\"daily_new_limit\": 3"), "{saved}");
+
+    config::run(
+        &mut ctx,
+        Some(ConfigAction::Reset {
+            key: Some("daily_new_limit".to_string()),
+            yes: false,
+        }),
+    )
+    .unwrap();
+    assert_eq!(ctx.config.daily_new_limit, 10);
+    assert_eq!(ctx.config.daily_goal, 20);
+    config::run(
+        &mut ctx,
+        Some(ConfigAction::Reset {
+            key: None,
+            yes: true,
+        }),
+    )
+    .unwrap();
+    let (loaded, _) = Config::load(&path).unwrap();
+    assert_eq!(loaded, Config::default());
 }
 
 #[test]

@@ -5,9 +5,9 @@ use stealthlingo::commands::lookup::{
     next_steps, render_entry, render_entry_to_width, wrap, Detail,
 };
 use stealthlingo::dictionary::{
-    accent_from_audio_url, accent_name, decode_cached, legacy, markup, normalize_audio_url,
-    normalize_headword, wiktionary, Definition, DictionaryClient, Endpoints, Entry, Meaning,
-    Phonetic,
+    accent_from_audio_url, accent_name, clean_word, decode_cached, legacy, markup,
+    normalize_audio_url, normalize_headword, wiktionary, Definition, DictionaryClient, Endpoints,
+    Entry, Meaning, Phonetic,
 };
 use stealthlingo::error::DictionaryError;
 
@@ -315,6 +315,13 @@ fn normalizes_headwords() {
     assert_eq!(normalize_headword("  Ice   Cream "), "ice cream");
     assert_eq!(normalize_headword("O'Clock"), "o'clock");
     assert_eq!(normalize_headword("   "), "");
+    assert_eq!(normalize_headword("\u{3000}Ephemeral\t"), "ephemeral");
+    assert_eq!(
+        normalize_headword("\u{200B}ice\u{00A0}\u{FEFF}cream\u{2060}"),
+        "ice cream"
+    );
+    assert_eq!(normalize_headword("\u{200B} \u{FEFF}"), "");
+    assert_eq!(clean_word(" \u{200B}Ice  Cream "), "Ice Cream");
 }
 
 #[test]

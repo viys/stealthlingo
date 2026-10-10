@@ -5,6 +5,7 @@
 mod audio;
 mod home;
 mod lookup;
+mod settings;
 mod stats;
 mod study;
 mod theme;
@@ -50,6 +51,7 @@ enum Target {
     /// A cached entry opened from the word list.
     Entry(Box<CachedWord>),
     Stats,
+    Settings,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,6 +209,12 @@ impl App {
             hidden: false,
             quit: false,
         };
+        if !ctx.config_warnings.is_empty() {
+            app.flash = Some(Flash {
+                text: format!("config.json: {}", ctx.config_warnings.join("; ")),
+                tone: Tone::Info,
+            });
+        }
         if let Start::Session(request) = start {
             let mut fx = Fx::default();
             app.open_session(ctx, request, &mut fx)?;
@@ -309,6 +317,18 @@ impl App {
     }
 
     fn open(&mut self, ctx: &mut Context, target: Target, fx: &mut Fx) -> Result<()> {
+        if matches!(
+            target,
+            Target::Home | Target::Stats | Target::Settings | Target::Session(_)
+        ) {
+            match ctx.reload_config() {
+                Ok(warnings) if !warnings.is_empty() => {
+                    fx.flash(Tone::Info, format!("config.json: {}", warnings.join("; ")));
+                }
+                Ok(_) => {}
+                Err(err) => fx.flash(Tone::Bad, format!("{err:#}; keeping the current settings")),
+            }
+        }
         self.screen = match target {
             Target::Home => Box::new(home::Home::load(ctx)?),
             Target::Session(request) => return self.open_session(ctx, request, fx),
@@ -320,6 +340,7 @@ impl App {
                 &ctx.config.accent,
             )),
             Target::Stats => Box::new(stats::Stats::load(ctx)?),
+            Target::Settings => Box::new(settings::Settings::load(ctx)?),
         };
         Ok(())
     }

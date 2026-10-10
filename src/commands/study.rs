@@ -5,7 +5,9 @@ use chrono::Utc;
 
 use super::{percent, Context};
 use crate::cli::{StudyArgs, StudyMode};
-use crate::learning::session::{build_queue, run_session, SessionPlan};
+use crate::learning::session::{
+    build_mistake_queue, build_queue, run_session, SessionPlan, MISTAKE_DAYS,
+};
 use crate::learning::Status;
 use crate::storage::StudyItem;
 use crate::time::{describe_due, local_day_start};
@@ -18,6 +20,11 @@ pub struct SessionRequest {
     pub due_only: bool,
     pub minutes: Option<u32>,
     pub count: Option<usize>,
+    /// Words answered wrong recently instead of due and new words.
+    pub mistakes: bool,
+    /// Started from the home screen or the default command: without explicit
+    /// limits, practise until today's goal is reached.
+    pub toward_goal: bool,
 }
 
 impl SessionRequest {
@@ -27,6 +34,8 @@ impl SessionRequest {
             due_only: false,
             minutes: args.minutes,
             count: args.count,
+            mistakes: args.mistakes,
+            toward_goal: false,
         }
     }
 
@@ -36,11 +45,22 @@ impl SessionRequest {
             due_only: true,
             minutes,
             count,
+            mistakes: false,
+            toward_goal: false,
+        }
+    }
+
+    pub fn toward_goal(self) -> Self {
+        Self {
+            toward_goal: true,
+            ..self
         }
     }
 
     pub fn title(&self) -> &'static str {
-        if self.due_only {
+        if self.mistakes {
+            "Mistakes"
+        } else if self.due_only {
             "Review"
         } else {
             "Quick Study"
@@ -68,25 +88,32 @@ pub fn prepare(ctx: &Context, request: &SessionRequest) -> Result<Prepared> {
     }
 
     let now = Utc::now();
-    let queue = build_queue(
-        &ctx.db,
-        request.mode,
-        request.due_only,
-        ctx.config.daily_new_limit,
-        now,
-        local_day_start(now),
-    )?;
-    if queue.is_empty() {
-        return Ok(Prepared::Empty(empty_queue_message(
-            ctx,
+    let day_start = local_day_start(now);
+    let queue = if request.mistakes {
+        build_mistake_queue(&ctx.db, request.mode, now)?
+    } else {
+        build_queue(
+            &ctx.db,
             request.mode,
             request.due_only,
-        )?));
+            ctx.config.daily_new_limit,
+            now,
+            day_start,
+        )?
+    };
+    if queue.is_empty() {
+        return Ok(Prepared::Empty(empty_queue_message(ctx, request)?));
     }
 
+    let practised_today = ctx.db.words_practised_since(day_start)?;
+    let daily_goal = ctx.config.daily_goal as usize;
+    let until_goal = request.toward_goal
+        && request.minutes.is_none()
+        && request.count.is_none()
+        && practised_today.len() < daily_goal;
     // Without explicit limits a session uses the configured default length.
     let minutes = match (request.minutes, request.count) {
-        (None, None) => Some(ctx.config.default_minutes.max(1)),
+        (None, None) if !until_goal => Some(ctx.config.default_minutes.max(1)),
         _ => request.minutes,
     };
     let due = queue
@@ -99,6 +126,12 @@ pub fn prepare(ctx: &Context, request: &SessionRequest) -> Result<Prepared> {
             time_limit: minutes.map(|m| Duration::from_secs(u64::from(m) * 60)),
             max_answers: request.count,
             accent: ctx.config.accent.clone(),
+            daily_goal,
+            practised_today,
+            until_goal,
+            whole_list: !request.due_only
+                && !request.mistakes
+                && matches!(request.mode, StudyMode::Memory | StudyMode::Mixed),
         },
         fresh: queue.len() - due,
         due,
@@ -135,11 +168,27 @@ pub fn start_session(ctx: &mut Context, request: &SessionRequest) -> Result<()> 
     if let Some(c) = plan.max_answers {
         limits.push(format!("{c} answers"));
     }
-    println!(
-        "Mode: {} · Session: {} · Due: {due} · New: {fresh}",
-        plan.mode.label(),
-        limits.join(", ")
-    );
+    if plan.until_goal {
+        let left = plan.daily_goal - plan.practised_today.len();
+        limits.push(format!(
+            "until today's goal ({left} more {})",
+            if left == 1 { "word" } else { "words" }
+        ));
+    }
+    if request.mistakes {
+        println!(
+            "Mode: {} · Session: {} · Words: {}",
+            plan.mode.label(),
+            limits.join(", "),
+            due + fresh
+        );
+    } else {
+        println!(
+            "Mode: {} · Session: {} · Due: {due} · New: {fresh}",
+            plan.mode.label(),
+            limits.join(", ")
+        );
+    }
 
     let audio = ctx.audio_player()?;
     let summary = run_session(&mut ctx.db, &audio, &plan, queue)?;
@@ -182,7 +231,7 @@ pub fn next_review_line(ctx: &Context) -> Result<Option<String>> {
         .map(|next| format!("Next review {}.", describe_due(next, now))))
 }
 
-fn empty_queue_message(ctx: &Context, mode: StudyMode, due_only: bool) -> Result<Vec<String>> {
+fn empty_queue_message(ctx: &Context, request: &SessionRequest) -> Result<Vec<String>> {
     let now = Utc::now();
     if ctx.db.collection_size()? == 0 {
         return Ok(vec![
@@ -190,11 +239,20 @@ fn empty_queue_message(ctx: &Context, mode: StudyMode, due_only: bool) -> Result
         ]);
     }
     let mut lines = Vec::new();
-    if mode == StudyMode::Listening {
+    if request.mistakes {
+        lines.push(format!(
+            "No mistakes to practise: nothing{} was answered wrong in the last {MISTAKE_DAYS} days.",
+            if request.mode == StudyMode::Listening {
+                " with pronunciation audio"
+            } else {
+                ""
+            }
+        ));
+    } else if request.mode == StudyMode::Listening {
         lines.push(
             "No saved words with pronunciation audio are ready for listening practice.".to_string(),
         );
-    } else if due_only {
+    } else if request.due_only {
         lines.push("Nothing is due for review.".to_string());
     } else {
         lines.push("Nothing to study right now.".to_string());
@@ -204,6 +262,15 @@ fn empty_queue_message(ctx: &Context, mode: StudyMode, due_only: bool) -> Result
                 ctx.config.daily_new_limit
             ));
         }
+    }
+    let goal = i64::from(ctx.config.daily_goal);
+    if goal > 0 {
+        let done = ctx.db.words_practised_since(local_day_start(now))?.len() as i64;
+        lines.push(if done >= goal {
+            format!("Today: {done} / {goal} words · goal reached.")
+        } else {
+            format!("Today: {done} / {goal} words.")
+        });
     }
     if let Some(next) = ctx.db.next_due_at()? {
         lines.push(format!("Next review {}.", describe_due(next, now)));

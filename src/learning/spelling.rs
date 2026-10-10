@@ -87,9 +87,84 @@ pub fn mask_word(text: &str, word: &str) -> String {
     out
 }
 
+/// The word with about half of its letters replaced by `_`, spaced out so
+/// every blank is visible: `e _ h e _ e r _ l`. The first letter of each
+/// word and all punctuation stay; words are separated by three spaces. The
+/// same word always gets the same blanks.
+pub fn missing_letters(word: &str) -> String {
+    let chars: Vec<char> = word.trim().chars().collect();
+    let candidates: Vec<usize> = (0..chars.len())
+        .filter(|&i| chars[i].is_alphabetic() && i > 0 && chars[i - 1].is_alphabetic())
+        .collect();
+    let letters = chars.iter().filter(|c| c.is_alphabetic()).count();
+    let mut hidden = vec![false; chars.len()];
+    if candidates.is_empty() {
+        // A single letter: hide it.
+        if let Some(first) = chars.iter().position(|c| c.is_alphabetic()) {
+            hidden[first] = true;
+        }
+    } else {
+        // FNV-1a of the word seeds a small generator, so the blanks look
+        // random but stay put between sessions.
+        let mut state = word
+            .to_lowercase()
+            .bytes()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+                (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+            });
+        let mut pool = candidates;
+        let count = (letters / 2).clamp(1, pool.len());
+        for _ in 0..count {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            let pick = (state >> 33) as usize % pool.len();
+            hidden[pool.swap_remove(pick)] = true;
+        }
+    }
+    let mut out = String::new();
+    for (i, c) in chars.iter().enumerate() {
+        if c.is_whitespace() {
+            if !out.ends_with("   ") {
+                out.push_str("   ");
+            }
+            continue;
+        }
+        if !out.is_empty() && !out.ends_with(' ') {
+            out.push(' ');
+        }
+        out.push(if hidden[i] { '_' } else { *c });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_letters_hide_about_half_of_the_letters() {
+        let pattern = missing_letters("ephemeral");
+        assert_eq!(pattern.chars().filter(|c| *c == '_').count(), 4);
+        assert!(pattern.starts_with("e "), "{pattern}");
+        assert_eq!(pattern.split(' ').count(), 9, "{pattern}");
+        assert_eq!(missing_letters("ephemeral"), pattern, "stable");
+        for (shown, actual) in pattern.split(' ').zip("ephemeral".chars()) {
+            assert!(shown == "_" || shown == actual.to_string(), "{pattern}");
+        }
+    }
+
+    #[test]
+    fn missing_letters_keep_punctuation_and_word_starts() {
+        let pattern = missing_letters("well-being");
+        assert!(pattern.contains('-'), "{pattern}");
+        assert!(pattern.contains("- b"), "{pattern}");
+        let pattern = missing_letters("ice cream");
+        assert!(pattern.starts_with("i "), "{pattern}");
+        assert!(pattern.contains("   c"), "{pattern}");
+        assert_eq!(missing_letters("a"), "_");
+        assert_eq!(missing_letters("an"), "a _");
+    }
 
     #[test]
     fn ignores_case_and_surrounding_whitespace() {

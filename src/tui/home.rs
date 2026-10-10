@@ -1,14 +1,15 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph};
 use ratatui::Frame;
 
 use super::{theme, widgets, Fx, Target, View};
-use crate::cli::StudyMode;
+use crate::cli::{StudyArgs, StudyMode};
+use crate::commands::stats::goal_progress;
 use crate::commands::study::SessionRequest;
 use crate::commands::Context;
 use crate::learning::Status;
@@ -18,22 +19,31 @@ use crate::time::{describe_due, local_day_start};
 enum Item {
     Review,
     Study(StudyMode),
+    Mistakes,
     Lookup,
     Words,
     Stats,
+    Settings,
     Quit,
 }
 
-const MENU: [(char, &str, Item); 8] = [
+const MENU: [(char, &str, Item); 12] = [
     ('r', "Review due words", Item::Review),
     ('s', "Study · flashcards", Item::Study(StudyMode::Memory)),
     ('p', "Spelling practice", Item::Study(StudyMode::Spelling)),
+    ('m', "Missing letters", Item::Study(StudyMode::Letters)),
     ('l', "Listening practice", Item::Study(StudyMode::Listening)),
+    ('x', "Mixed practice", Item::Study(StudyMode::Mixed)),
+    ('e', "Retry mistakes", Item::Mistakes),
     ('/', "Look up a word", Item::Lookup),
     ('w', "Word list", Item::Words),
     ('t', "Stats", Item::Stats),
+    ('c', "Settings", Item::Settings),
     ('q', "Quit", Item::Quit),
 ];
+
+/// Body width from which a menu that does not fit is split into two columns.
+const TWO_COLUMNS_WIDTH: u16 = 84;
 
 pub struct Home {
     saved: i64,
@@ -41,6 +51,8 @@ pub struct Home {
     new_available: i64,
     answers_today: i64,
     correct_today: i64,
+    words_today: i64,
+    daily_goal: u32,
     next_due: Option<DateTime<Utc>>,
     selected: usize,
     /// First menu row shown when the menu does not fit.
@@ -63,6 +75,8 @@ impl Home {
             new_available: new_ready.min(allowance),
             answers_today: stats.attempts_today,
             correct_today: stats.correct_today,
+            words_today: stats.words_today,
+            daily_goal: ctx.config.daily_goal,
             next_due: stats.next_due,
             // Today's practice: reviews when something is due, otherwise new words.
             selected: if stats.due_now > 0 { 0 } else { 1 },
@@ -73,16 +87,28 @@ impl Home {
 
     fn activate(&self, item: Item, fx: &mut Fx) {
         match item {
-            Item::Review => fx.go(Target::Session(SessionRequest::review(None, None))),
-            Item::Study(mode) => fx.go(Target::Session(SessionRequest {
-                mode,
-                due_only: false,
-                minutes: None,
-                count: None,
-            })),
+            Item::Review => fx.go(Target::Session(
+                SessionRequest::review(None, None).toward_goal(),
+            )),
+            Item::Study(mode) => fx.go(Target::Session(
+                SessionRequest {
+                    mode,
+                    ..SessionRequest::study(&StudyArgs::default())
+                }
+                .toward_goal(),
+            )),
+            Item::Mistakes => fx.go(Target::Session(
+                SessionRequest {
+                    mode: StudyMode::Mixed,
+                    mistakes: true,
+                    ..SessionRequest::study(&StudyArgs::default())
+                }
+                .toward_goal(),
+            )),
             Item::Lookup => fx.go(Target::Lookup),
             Item::Words => fx.go(Target::Words),
             Item::Stats => fx.go(Target::Stats),
+            Item::Settings => fx.go(Target::Settings),
             Item::Quit => fx.quit(),
         }
     }
@@ -127,7 +153,22 @@ impl Home {
         } else {
             String::new()
         };
-        vec![
+        let mut lines = Vec::new();
+        if self.daily_goal > 0 {
+            let style = if self.words_today >= i64::from(self.daily_goal) {
+                theme::good()
+            } else {
+                theme::strong()
+            };
+            let mut goal = row(
+                "Daily goal",
+                goal_progress(self.words_today, self.daily_goal),
+                style,
+            );
+            goal.spans.push(Span::styled("   c change", theme::dim()));
+            lines.push(goal);
+        }
+        lines.extend([
             row("Due now", self.due.to_string(), self.due_style()),
             row(
                 "New today",
@@ -145,7 +186,8 @@ impl Home {
                     .map_or("-".to_string(), |next| describe_due(next, now)),
                 theme::strong(),
             ),
-        ]
+        ]);
+        lines
     }
 
     /// The numbers of [`Self::summary`] on one line, for short terminals.
@@ -156,7 +198,18 @@ impl Home {
         let next = self
             .next_due
             .map_or("-".to_string(), |next| describe_due(next, Utc::now()));
-        vec![Line::from(vec![
+        let mut spans = Vec::new();
+        if self.daily_goal > 0 {
+            spans.extend([
+                Span::styled("Goal ", theme::dim()),
+                Span::styled(
+                    format!("{}/{}", self.words_today, self.daily_goal),
+                    theme::strong(),
+                ),
+                Span::styled(" · ", theme::dim()),
+            ]);
+        }
+        spans.extend([
             Span::styled("Due ", theme::dim()),
             Span::styled(self.due.to_string(), self.due_style()),
             Span::styled(" · New ", theme::dim()),
@@ -165,7 +218,8 @@ impl Home {
             Span::styled(self.answers_today.to_string(), theme::strong()),
             Span::styled(" · Next ", theme::dim()),
             Span::styled(next, theme::strong()),
-        ])]
+        ]);
+        vec![Line::from(spans)]
     }
 
     fn due_style(&self) -> Style {
@@ -188,8 +242,14 @@ impl View for Home {
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         // Short terminals get a tighter box, then a one-line summary, then a
-        // scrolling menu, so the highlighted item is always on screen.
-        let menu_rows = MENU.len() as u16;
+        // menu in two columns when it is wide enough, or else a scrolling
+        // menu, so the highlighted item is always on screen.
+        let columns = if area.height < MENU.len() as u16 + 2 && area.width >= TWO_COLUMNS_WIDTH {
+            2
+        } else {
+            1
+        };
+        let menu_rows = MENU.len().div_ceil(columns) as u16;
         let summary = self.summary();
         let rows = summary.len() as u16;
         let room = area.height.saturating_sub(menu_rows + 1);
@@ -219,13 +279,6 @@ impl View for Home {
             height: area.height.saturating_sub(top_height + gap),
             ..area
         };
-        self.menu_offset = widgets::scroll_to(
-            self.menu_offset,
-            self.selected,
-            menu.height as usize,
-            MENU.len(),
-        );
-
         let lines: Vec<Line> = MENU
             .iter()
             .enumerate()
@@ -235,7 +288,7 @@ impl View for Home {
                 let mut line = Line::from(vec![
                     Span::styled(marker, theme::heading()),
                     Span::styled(format!("{key}  "), theme::heading()),
-                    Span::styled(format!("{label:<22}"), theme::strong()),
+                    Span::styled(format!("{label:<20}"), theme::strong()),
                     Span::styled(self.detail(*item), theme::dim()),
                 ]);
                 if selected {
@@ -244,6 +297,21 @@ impl View for Home {
                 line
             })
             .collect();
+        if columns == 2 {
+            let [left, right] =
+                Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).areas(menu);
+            let mut lines = lines;
+            let second = lines.split_off(menu_rows as usize);
+            frame.render_widget(Paragraph::new(lines), left);
+            frame.render_widget(Paragraph::new(second), right);
+            return;
+        }
+        self.menu_offset = widgets::scroll_to(
+            self.menu_offset,
+            self.selected,
+            menu.height as usize,
+            MENU.len(),
+        );
         frame.render_widget(
             Paragraph::new(lines).scroll((self.menu_offset as u16, 0)),
             menu,

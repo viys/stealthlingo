@@ -5,14 +5,20 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 
+use super::repository::VIA_AGENT;
 use super::Database;
 use crate::dictionary::decode_cached;
 use crate::learning::{Grade, PracticeMode, Status};
 use crate::time::{from_db, to_db};
 
 pub const BACKUP_FORMAT: &str = "stealthlingo-backup";
-/// Version 2 added `source` and `entry_json`; version 1 files still import.
-pub const BACKUP_VERSION: u32 = 2;
+/// Version 2 added `source` and `entry_json`, version 3 who added a word and
+/// which words the user removed. Older files still import.
+pub const BACKUP_VERSION: u32 = 3;
+
+fn added_by_user() -> String {
+    "user".to_string()
+}
 
 /// Version 1 backups only contain Free Dictionary responses.
 fn default_source() -> String {
@@ -44,6 +50,9 @@ pub struct BackupWord {
     /// Present only for words on the study list.
     #[serde(default)]
     pub progress: Option<BackupProgress>,
+    /// When the user removed the word, so AI agents do not add it again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dismissed_at: Option<String>,
     #[serde(default)]
     pub attempts: Vec<BackupAttempt>,
 }
@@ -59,6 +68,11 @@ pub struct BackupProgress {
     pub lapses: u32,
     pub added_at: String,
     pub last_reviewed_at: Option<String>,
+    /// "user", or "mcp" for words added by an AI agent.
+    #[serde(default = "added_by_user")]
+    pub added_via: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -96,8 +110,10 @@ impl Database {
                     w.has_audio, w.source_fetched_at, w.created_at,
                     u.word_id IS NOT NULL, u.status, u.personal_note, u.due_at, u.interval_days,
                     u.repetitions, u.ease_factor, u.lapses, u.added_at, u.last_reviewed_at,
-                    w.source, w.entry_json
-             FROM words w LEFT JOIN user_words u ON u.word_id = w.id
+                    w.source, w.entry_json, u.added_via, u.added_reason, d.dismissed_at
+             FROM words w
+             LEFT JOIN user_words u ON u.word_id = w.id
+             LEFT JOIN dismissed_words d ON d.word_id = w.id
              ORDER BY w.id",
         )?;
         let mut attempts_stmt = self.conn.prepare(
@@ -119,6 +135,8 @@ impl Database {
                         lapses: row.get(15)?,
                         added_at: row.get(16)?,
                         last_reviewed_at: row.get(17)?,
+                        added_via: row.get(20)?,
+                        added_reason: row.get(21)?,
                     })
                 } else {
                     None
@@ -136,6 +154,7 @@ impl Database {
                         source: row.get(18)?,
                         entry_json: row.get(19)?,
                         progress,
+                        dismissed_at: row.get(22)?,
                         attempts: Vec::new(),
                     },
                 ))
@@ -263,6 +282,13 @@ fn import_word(tx: &Transaction<'_>, word: &BackupWord, summary: &mut ImportSumm
     if let Some(progress) = &word.progress {
         import_progress(tx, word_id, progress, summary)?;
     }
+    if let Some(dismissed_at) = &word.dismissed_at {
+        tx.execute(
+            "INSERT OR IGNORE INTO dismissed_words (word_id, dismissed_at)
+             SELECT ?1, ?2 WHERE NOT EXISTS (SELECT 1 FROM user_words WHERE word_id = ?1)",
+            params![word_id, canonical_ts(dismissed_at)?],
+        )?;
+    }
     for attempt in &word.attempts {
         import_attempt(tx, word_id, attempt, summary)?;
     }
@@ -302,12 +328,32 @@ fn import_progress(
     ];
     match existing {
         None => {
+            let via = if progress.added_via == VIA_AGENT {
+                VIA_AGENT
+            } else {
+                "user"
+            };
             tx.execute(
                 "INSERT INTO user_words (word_id, status, personal_note, due_at, interval_days,
-                        repetitions, ease_factor, lapses, added_at, last_reviewed_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                values,
+                        repetitions, ease_factor, lapses, added_at, last_reviewed_at,
+                        added_via, added_reason)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    word_id,
+                    status.as_str(),
+                    progress.personal_note,
+                    due_at,
+                    progress.interval_days,
+                    progress.repetitions,
+                    progress.ease_factor,
+                    progress.lapses,
+                    added_at,
+                    last_reviewed,
+                    via,
+                    progress.added_reason,
+                ],
             )?;
+            tx.execute("DELETE FROM dismissed_words WHERE word_id = ?1", [word_id])?;
             summary.progress_added += 1;
         }
         Some((existing_reviewed, existing_note)) => {

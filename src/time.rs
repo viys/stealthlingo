@@ -2,7 +2,7 @@
 //! strings so that SQLite can compare them lexicographically.
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local, SecondsFormat, TimeZone, Utc};
+use chrono::{DateTime, Days, Local, SecondsFormat, TimeZone, Utc};
 
 pub fn to_db(dt: DateTime<Utc>) -> String {
     dt.to_rfc3339_opts(SecondsFormat::Secs, true)
@@ -16,16 +16,27 @@ pub fn from_db(value: &str) -> Result<DateTime<Utc>> {
 
 /// Start of the current local calendar day, expressed in UTC.
 pub fn local_day_start(now: DateTime<Utc>) -> DateTime<Utc> {
-    let local = now.with_timezone(&Local);
-    let midnight = local
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .expect("midnight is always valid");
-    Local
-        .from_local_datetime(&midnight)
-        .earliest()
+    local_day_start_before(now, 0)
+}
+
+/// Start of the local calendar day `days_ago` days before today, in UTC.
+pub fn local_day_start_before(now: DateTime<Utc>, days_ago: u32) -> DateTime<Utc> {
+    let date = now.with_timezone(&Local).date_naive() - Days::new(days_ago.into());
+    let midnight = date.and_hms_opt(0, 0, 0).expect("midnight is always valid");
+    // Midnight can fall into a DST gap; the first valid time after it is used.
+    (0..4)
+        .find_map(|hour| {
+            Local
+                .from_local_datetime(&(midnight + chrono::Duration::hours(hour)))
+                .earliest()
+        })
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or(now)
+}
+
+/// Short weekday name of a UTC time in local time, e.g. "Mon".
+pub fn local_weekday(dt: DateTime<Utc>) -> String {
+    dt.with_timezone(&Local).format("%a").to_string()
 }
 
 pub fn format_local(dt: DateTime<Utc>) -> String {

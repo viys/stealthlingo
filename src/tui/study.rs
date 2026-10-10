@@ -15,7 +15,7 @@ use crate::cli::StudyMode;
 use crate::commands::study::SessionRequest;
 use crate::commands::Context;
 use crate::learning::session::{
-    gave_up, judge_spelling, memory_answer, Answer, Session, SessionPlan,
+    gave_up, judge_spelling, memory_answer, spelling_hint, Answer, Session, SessionPlan,
 };
 use crate::learning::spelling::diff_chars;
 use crate::learning::{Grade, Status};
@@ -36,6 +36,8 @@ enum Phase {
 
 struct Card {
     item: StudyItem,
+    /// How this word is asked; varies in mixed practice.
+    mode: StudyMode,
     asked_at: Instant,
     phase: Phase,
     voice: Voice,
@@ -83,25 +85,24 @@ impl Study {
         study
     }
 
-    fn mode(&self) -> StudyMode {
-        self.session.plan().mode
-    }
-
     fn advance(&mut self, ctx: &Context, fx: &mut Fx) {
         let Some(item) = self.session.next_item() else {
             self.finish(ctx);
             return;
         };
-        let phase = match self.mode() {
-            StudyMode::Memory => Phase::Front,
-            StudyMode::Spelling | StudyMode::Listening => Phase::Typing(LineInput::default()),
+        let mode = self.session.current_mode();
+        let phase = if mode.is_typed() {
+            Phase::Typing(LineInput::default())
+        } else {
+            Phase::Front
         };
         let mut voice = Voice::default();
-        if self.mode() == StudyMode::Listening {
+        if mode == StudyMode::Listening {
             voice.play(&item.entry, &self.session.plan().accent, fx);
         }
         self.stage = Stage::Card(Box::new(Card {
             item,
+            mode,
             asked_at: Instant::now(),
             phase,
             voice,
@@ -112,6 +113,8 @@ impl Study {
         let summary = self.session.summary();
         let reason = if summary.time_up {
             "Time's up"
+        } else if summary.goal_done {
+            "That's today's goal"
         } else if summary.stopped_early {
             "Session ended"
         } else if self.session.queue_is_empty() {
@@ -154,11 +157,11 @@ impl Study {
     }
 
     fn card_key(&mut self, ctx: &mut Context, key: KeyEvent, fx: &mut Fx) -> Result<()> {
-        let mode = self.mode();
         let accent = self.session.plan().accent.clone();
         let Stage::Card(card) = &mut self.stage else {
             return Ok(());
         };
+        let mode = card.mode;
         match &mut card.phase {
             Phase::Front => match key.code {
                 KeyCode::Char(' ') | KeyCode::Enter => card.phase = Phase::Back,
@@ -250,7 +253,18 @@ impl Study {
         if let Some(left) = self.session.time_left() {
             tail.push_str(&format!("  ·  {} left", widgets::clock(left.as_secs())));
         }
-        let label = format!("{}  ", self.mode().label());
+        let plan = self.session.plan();
+        if plan.until_goal {
+            tail.push_str(&format!(
+                "  ·  goal {}/{}",
+                self.session.words_today(),
+                plan.daily_goal
+            ));
+        }
+        let label = match (plan.mode, &self.stage) {
+            (StudyMode::Mixed, Stage::Card(card)) => format!("Mixed · {}  ", card.mode.label()),
+            _ => format!("{}  ", plan.mode.label()),
+        };
         let bar_width = width
             .saturating_sub(label.chars().count() + tail.chars().count())
             .clamp(10, 40);
@@ -281,7 +295,7 @@ impl Study {
                 }
             }
             Phase::Typing(_) => {
-                if self.mode() == StudyMode::Listening {
+                if card.mode == StudyMode::Listening {
                     lines.push(Line::from(vec![
                         Span::styled("♪  ", theme::heading()),
                         Span::styled("Listen and type the word you hear.", theme::strong()),
@@ -301,9 +315,17 @@ impl Study {
                     lines.extend(meaning_lines(entry, note, true, width));
                 }
                 lines.push(Line::raw(""));
+                let blanks = card.mode == StudyMode::Letters;
                 lines.push(Line::from(vec![
                     Span::styled("hint  ", theme::label()),
-                    Span::styled(letter_hint(&entry.word), theme::dim()),
+                    Span::styled(
+                        spelling_hint(&entry.word, blanks),
+                        if blanks {
+                            theme::strong()
+                        } else {
+                            theme::dim()
+                        },
+                    ),
                 ]));
             }
             Phase::Feedback { answer, next_due } => {
@@ -424,6 +446,19 @@ impl Study {
             lines.push(Line::raw(""));
             lines.push(Line::styled("No answers recorded.", theme::dim()));
         }
+        if let Some(goal) = self.session.goal_message() {
+            let style = if summary.goal_reached_now {
+                theme::good()
+            } else {
+                theme::strong()
+            };
+            lines.push(Line::raw(""));
+            lines.extend(
+                widgets::wrap_text(&goal, area.width.saturating_sub(8) as usize)
+                    .into_iter()
+                    .map(|l| Line::styled(l, style)),
+            );
+        }
         if let Some(next) = next {
             lines.push(Line::raw(""));
             lines.push(Line::styled(next.to_string(), theme::dim()));
@@ -456,14 +491,6 @@ fn status_line(item: &StudyItem) -> Line<'static> {
         status => status.as_str(),
     };
     Line::styled(text, theme::dim())
-}
-
-fn letter_hint(word: &str) -> String {
-    let letters = word.chars().filter(|c| c.is_alphabetic()).count();
-    match word.split_whitespace().count() {
-        n if n > 1 => format!("{n} words, {letters} letters"),
-        _ => format!("{letters} letters"),
-    }
 }
 
 /// Verdict, then for a wrong answer the typed text and the answer with the
@@ -543,7 +570,7 @@ impl View for Study {
                 ("a", audio),
                 ("q", "end"),
             ],
-            Phase::Typing(_) if self.mode() == StudyMode::Listening => vec![
+            Phase::Typing(_) if card.mode == StudyMode::Listening => vec![
                 ("Enter", "submit / replay"),
                 ("Tab", "show answer"),
                 ("^R", if audio == "audio" { "replay" } else { audio }),

@@ -6,14 +6,18 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use super::widgets::{headline, labelled, LineInput};
 use super::{theme, Fx, Target, Tone, View, Voice};
 use crate::commands::Context;
 use crate::dictionary::normalize_headword;
 use crate::learning::Status;
-use crate::storage::{CachedWord, WordSummary};
+use crate::storage::{CachedWord, WordFilter, WordSummary};
 use crate::time::describe_due;
+
+/// Shown after words an AI agent added.
+const AGENT_MARK: &str = " agent";
 
 enum Mode {
     Browse,
@@ -27,6 +31,7 @@ pub struct Words {
     /// Indices into `all` that match the filter.
     shown: Vec<usize>,
     filter: LineInput,
+    conditions: WordFilter,
     mode: Mode,
     table: TableState,
     selected: Option<CachedWord>,
@@ -51,6 +56,7 @@ impl Words {
             all: Vec::new(),
             shown: Vec::new(),
             filter: LineInput::default(),
+            conditions: WordFilter::default(),
             mode: Mode::Browse,
             table: TableState::default(),
             selected: None,
@@ -77,16 +83,18 @@ impl Words {
 
     fn apply_filter(&mut self) {
         let query = self.filter.text().trim().to_lowercase();
+        let now = Utc::now();
         self.shown = self
             .all
             .iter()
             .enumerate()
             .filter(|(_, w)| {
-                query.is_empty()
+                (query.is_empty()
                     || w.display_word.to_lowercase().contains(&query)
                     || w.note
                         .as_deref()
-                        .is_some_and(|n| n.to_lowercase().contains(&query))
+                        .is_some_and(|n| n.to_lowercase().contains(&query)))
+                    && self.conditions.matches(w, now)
             })
             .map(|(i, _)| i)
             .collect();
@@ -126,6 +134,56 @@ impl Words {
         self.load_selected(ctx)
     }
 
+    /// Parts of speech in the word list, most common first.
+    fn parts_of_speech(&self) -> Vec<String> {
+        let mut counts: Vec<(String, usize)> = Vec::new();
+        for pos in self.all.iter().flat_map(|w| &w.parts_of_speech) {
+            match counts.iter_mut().find(|(p, _)| p == pos) {
+                Some((_, n)) => *n += 1,
+                None => counts.push((pos.clone(), 1)),
+            }
+        }
+        counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        counts.into_iter().map(|(p, _)| p).collect()
+    }
+
+    fn cycle_status(&mut self) {
+        let next = match self.conditions.status {
+            None => Some(0),
+            Some(s) => Status::ALL.iter().position(|&x| x == s).map(|i| i + 1),
+        };
+        self.conditions.status = next.and_then(|i| Status::ALL.get(i).copied());
+    }
+
+    fn cycle_part_of_speech(&mut self) {
+        let parts = self.parts_of_speech();
+        let next = match &self.conditions.part_of_speech {
+            None => 0,
+            Some(current) => parts
+                .iter()
+                .position(|p| p == current)
+                .map_or(parts.len(), |i| i + 1),
+        };
+        self.conditions.part_of_speech = parts.get(next).cloned();
+    }
+
+    fn change_conditions(&mut self, ctx: &Context, fx: &mut Fx) -> Result<()> {
+        self.apply_filter();
+        self.load_selected(ctx)?;
+        let message = if self.conditions.is_empty() {
+            "Showing all words.".to_string()
+        } else {
+            format!(
+                "Showing {} of {}: {}.",
+                self.shown.len(),
+                self.all.len(),
+                self.conditions.describe()
+            )
+        };
+        fx.flash(Tone::Info, message);
+        Ok(())
+    }
+
     fn browse_key(&mut self, ctx: &mut Context, key: KeyEvent, fx: &mut Fx) -> Result<()> {
         let page = self.page as isize;
         match key.code {
@@ -136,6 +194,18 @@ impl Words {
             KeyCode::Home | KeyCode::Char('g') => self.move_by(ctx, isize::MIN)?,
             KeyCode::End | KeyCode::Char('G') => self.move_by(ctx, isize::MAX)?,
             KeyCode::Char('/') => self.mode = Mode::Filter,
+            KeyCode::Char('s') => {
+                self.cycle_status();
+                self.change_conditions(ctx, fx)?;
+            }
+            KeyCode::Char('p') => {
+                self.cycle_part_of_speech();
+                self.change_conditions(ctx, fx)?;
+            }
+            KeyCode::Char('u') => {
+                self.conditions.due = !self.conditions.due;
+                self.change_conditions(ctx, fx)?;
+            }
             KeyCode::Enter => {
                 if let Some(cached) = &self.selected {
                     fx.go(Target::Entry(Box::new(cached.clone())));
@@ -194,6 +264,20 @@ impl Words {
                         width,
                     ));
                 }
+                if word.added_by_agent {
+                    let reason = match &word.added_reason {
+                        Some(reason) => format!("suggested by an AI agent: {reason}"),
+                        None => "suggested by an AI agent".to_string(),
+                    };
+                    lines.extend(labelled(
+                        "agent",
+                        theme::label(),
+                        6,
+                        &reason,
+                        theme::dim(),
+                        width,
+                    ));
+                }
             }
         }
         lines
@@ -202,7 +286,11 @@ impl Words {
 
 impl View for Words {
     fn title(&self) -> String {
-        format!("Word list ({})", self.all.len())
+        if self.shown.len() == self.all.len() {
+            format!("Word list ({})", self.all.len())
+        } else {
+            format!("Word list ({} of {})", self.shown.len(), self.all.len())
+        }
     }
 
     fn hints(&self) -> Vec<(&'static str, &'static str)> {
@@ -219,6 +307,7 @@ impl View for Words {
                 ),
                 ("n", "note"),
                 ("d", "remove"),
+                ("s p u", "status/pos/due"),
                 ("q", "back"),
             ],
             Mode::Filter => vec![("Enter", "done"), ("↑↓", "move"), ("^C", "clear")],
@@ -228,7 +317,9 @@ impl View for Words {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let filtering = matches!(self.mode, Mode::Filter) || !self.filter.text().is_empty();
+        let filtering = matches!(self.mode, Mode::Filter)
+            || !self.filter.text().is_empty()
+            || !self.conditions.is_empty();
         let filter_height = if filtering { 2 } else { 0 };
         // Short terminals shrink the details before the table drops below a
         // header and four rows.
@@ -247,17 +338,31 @@ impl View for Words {
                 height: 1,
                 ..filter_row
             };
+            let conditions = self.conditions.describe();
+            let conditions_width = if conditions.is_empty() {
+                0
+            } else {
+                (conditions.width() as u16 + 2).min(row.width / 2)
+            };
+            let [text_row, conditions_row] =
+                Layout::horizontal([Constraint::Fill(1), Constraint::Length(conditions_width)])
+                    .areas(row);
             if matches!(self.mode, Mode::Filter) {
-                self.filter.render(frame, row, prompt);
+                self.filter.render(frame, text_row, prompt);
             } else {
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
                         prompt,
                         Span::raw(self.filter.text().to_string()),
                     ])),
-                    row,
+                    text_row,
                 );
             }
+            frame.render_widget(
+                Paragraph::new(Line::styled(conditions, theme::accent()))
+                    .alignment(ratatui::layout::Alignment::Right),
+                conditions_row,
+            );
         }
 
         if self.all.is_empty() {
@@ -278,7 +383,14 @@ impl View for Words {
         let word_width = self
             .all
             .iter()
-            .map(|w| w.display_word.chars().count())
+            .map(|w| {
+                w.display_word.width()
+                    + if w.added_by_agent {
+                        AGENT_MARK.width()
+                    } else {
+                        0
+                    }
+            })
             .max()
             .unwrap_or(4)
             .clamp(4, 24) as u16;
@@ -299,8 +411,12 @@ impl View for Words {
                     ]),
                     None => Line::styled(w.summary.clone(), theme::dim()),
                 };
+                let mut word = vec![Span::styled(w.display_word.clone(), theme::strong())];
+                if w.added_by_agent {
+                    word.push(Span::styled(AGENT_MARK, theme::dim()));
+                }
                 Row::new(vec![
-                    Cell::from(Span::styled(w.display_word.clone(), theme::strong())),
+                    Cell::from(Line::from(word)),
                     Cell::from(Span::styled(w.status.as_str(), status_style(w.status))),
                     Cell::from(Span::styled(due, theme::dim())),
                     Cell::from(detail),

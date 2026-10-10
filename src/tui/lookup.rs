@@ -11,6 +11,7 @@ use super::widgets::{headline, labelled, LineInput};
 use super::{theme, Fx, Target, Tone, View, Voice};
 use crate::commands::lookup::{shown_meanings, Detail, BRIEF_DEFINITIONS_PER_MEANING};
 use crate::commands::{fetch_word, Context, Freshness};
+use crate::dictionary::clean_word;
 use crate::storage::{AddOutcome, CachedWord};
 use crate::time::format_local;
 
@@ -271,8 +272,11 @@ impl View for Lookup {
     fn handle_key(&mut self, ctx: &mut Context, key: KeyEvent, fx: &mut Fx) -> Result<()> {
         if self.editing {
             if key.code == KeyCode::Enter {
-                let word = self.input.text().trim().to_string();
-                if !word.is_empty() {
+                let word = clean_word(self.input.text());
+                if word.is_empty() {
+                    self.input = LineInput::default();
+                    fx.flash(Tone::Info, "Type a word to look up, then press Enter.");
+                } else {
                     self.pending = Some(word);
                     self.editing = false;
                 }

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -8,6 +8,7 @@ use ratatui::widgets::{Block, BorderType, Paragraph};
 use ratatui::Frame;
 
 use super::{theme, widgets, Fx, Target, View};
+use crate::commands::stats::{goal_progress, recent_days, week_line};
 use crate::commands::Context;
 use crate::learning::Status;
 use crate::storage;
@@ -15,6 +16,9 @@ use crate::time::{describe_due, format_local, local_day_start};
 
 pub struct Stats {
     stats: storage::Stats,
+    daily_goal: u32,
+    /// Different words answered on each of the last seven days.
+    week: Vec<(DateTime<Utc>, i64)>,
     scroll: usize,
     /// Lines that do not fit below the scroll position, as of the last draw.
     max_scroll: usize,
@@ -23,8 +27,15 @@ pub struct Stats {
 impl Stats {
     pub fn load(ctx: &Context) -> Result<Self> {
         let now = Utc::now();
+        let daily_goal = ctx.config.daily_goal;
         Ok(Self {
             stats: ctx.db.stats(now, local_day_start(now))?,
+            daily_goal,
+            week: if daily_goal > 0 {
+                recent_days(ctx, now, 7)?
+            } else {
+                Vec::new()
+            },
             scroll: 0,
             max_scroll: 0,
         })
@@ -96,6 +107,21 @@ impl View for Stats {
                 s.new_words_today
             ),
         ));
+        if self.daily_goal > 0 {
+            lines.push(row(
+                "Daily goal",
+                goal_progress(s.words_today, self.daily_goal),
+            ));
+            let goal = i64::from(self.daily_goal);
+            let reached = self.week.iter().filter(|(_, n)| *n >= goal).count();
+            lines.push(row(
+                "Last 7 days",
+                format!(
+                    "{reached} of 7 reached · {}",
+                    week_line(&self.week, self.daily_goal)
+                ),
+            ));
+        }
         lines.push(row(
             "All time",
             format!(

@@ -4,7 +4,7 @@
 >
 > **核心理念：** 打开终端，几秒进入练习；每轮只花 3–5 分钟；按一下 Esc 就能藏起来；本地保留学习进度；不用网络也能复习已经缓存的词。
 
-> **当前状态（v0.1.0）：** P0 全部完成，并已加入全屏 TUI、老板键、英美音选择、可点击查词结果（Windows）和预编译二进制发布。早期版本使用的 Free Dictionary API 已经弃用，只保留读取旧缓存的兼容代码。
+> **当前状态（v0.1.2）：** P0 和 P1 全部完成，并已加入全屏 TUI、老板键、英美音选择、可点击查词结果（Windows）、全屏设置界面、供 AI agent 推荐单词的 MCP 服务器和预编译二进制发布。早期版本使用的 Free Dictionary API 已经弃用，只保留读取旧缓存的兼容代码。
 
 ## 1. 产品原则
 
@@ -37,7 +37,7 @@ stealthlingo study --mode listening --count 10
 stealthlingo --plain
 ```
 
-全屏首页菜单：`r` 复习、`s` 记忆卡片、`p` 拼写、`l` 听音拼写、`/` 查词、`w` 词库、`t` 统计、`c` 设置（规划中）、`q` 退出。首页同时显示今日目标进度，例如 `Today 6 / 10 words`（规划中，见第 4 节 `daily_goal`）。
+全屏首页菜单：`r` 复习、`s` 记忆卡片、`p` 拼写、`m` 缺字母拼写、`l` 听音拼写、`x` 混合练习、`e` 错词重练、`/` 查词、`w` 词库、`t` 统计、`c` 设置、`q` 退出。首页同时显示今日目标进度，例如 `Today 6 / 10 words`（见第 4 节 `daily_goal`）。
 
 `--plain` 模式下默认命令直接给出有用的下一步：有到期词条时优先复习；没有到期词时学习新词；词库为空时提示如何查询并收藏第一个单词。
 
@@ -106,12 +106,12 @@ Your spelling: _
 
 待做：
 
-- [ ] 缺字母拼写，例如 `e_ph_m_r_l`。
-- [ ] 错词重练模式，优先复习最近写错的词（可利用 `lapses` 和 `practice_attempts`）。
-- [ ] `study --mode mixed`：混合记忆、拼写和听音拼写。
-- [ ] 按词性、熟悉程度和到期状态筛选词库。
-- [ ] 每日学习目标：新增 `daily_goal`（每天练习的单词数量，不按时间计），首页和 `stats` 显示今日进度，达成时给出一行提示；不强制、不打断会话。
-- [ ] 所有配置项都可由用户自己设置：全屏设置界面（首页按 `c`）、`config set`、`config reset`，以及直接编辑 `config.json`（见第 4 节）。
+- [x] 缺字母拼写：`study --mode letters`（首页 `m`），显示约一半字母，如 `e _ h e _ e r _ l`；同一个词每次挖空位置相同，答题按拼写模式记录。
+- [x] 错词重练：`study --mistakes`（首页 `e`，混合模式），选取 30 天内答错过或 `lapses > 0` 的词，最近答错的排在前面，不论是否到期。
+- [x] `study --mode mixed`（首页 `x`）：新词先用记忆卡片，其余词在记忆、拼写和（有音频时）听音拼写之间轮换。
+- [x] 按词性、熟悉程度和到期状态筛选词库：`words` / `search` 的 `--status`、`--pos`、`--due`；词库界面 `s` / `p` / `u`。
+- [x] 每日学习目标：新增 `daily_goal`（每天练习的单词数量，不按时间计），首页和 `stats` 显示今日进度，达成时给出一行提示；不强制、不打断会话。
+- [x] 所有配置项都可由用户自己设置：全屏设置界面（首页按 `c`）、`config set`、`config reset`，以及直接编辑 `config.json`（见第 4 节）。
 
 ### P2 — 后续探索
 
@@ -120,7 +120,7 @@ Your spelling: _
 - [x] 可点击的查词结果（Windows）：`links install` 注册 `stealthlingo://` 协议后，在支持超链接的终端中 Ctrl+点击发音即可播放，点击末行即可收藏或移除单词。
 - [x] 预编译二进制和一键安装脚本（Windows / macOS / Linux）。
 - [ ] 可点击链接支持 macOS / Linux (暂无测试条件延缓)。
-- [ ] MCP 服务器（`stealthlingo mcp`）：让 Cursor、Claude 等 agent 查词、查看词库，并把推荐学习的单词加入学习列表（见第 8 节）。
+- [x] MCP 服务器（`stealthlingo mcp`）：让 Cursor、Claude 等 agent 查词、查看词库，并把推荐学习的单词加入学习列表（见第 8 节）。
 - [ ] 句子听写：需要另外的句子音频或 TTS 来源，Wiktionary 不为例句提供音频。
 - [ ] 自定义词组和专题练习。
 - [ ] 更多语言：为每种语言确认 Wiktionary 对应版本的字段覆盖率和解析方式后再支持。
@@ -133,45 +133,48 @@ Commands:
   lookup <WORD> [--all]           查询 Wiktionary（刷新缓存，离线时用缓存）
   add <WORD> [--note TEXT]        收藏单词；重复收藏无副作用，--note 更新笔记
   remove <WORD>                   从个人词库移除单词（保留词典缓存和历史记录）
-  words                           列出已收藏单词
-  search <QUERY>                  搜索本地词库和个人笔记
-  study [--mode M] [--minutes N] [--count N]
-                                  开始学习会话，M = memory | spelling | listening
+  words [--status S] [--pos P] [--due]
+                                  列出已收藏单词，可按状态、词性、是否到期筛选
+  search <QUERY> [--status S] [--pos P] [--due]
+                                  搜索本地词库和个人笔记
+  study [--mode M] [--mistakes] [--minutes N] [--count N]
+                                  开始学习会话，M = memory | spelling | letters | listening | mixed；
+                                  --mistakes 只练近期答错的词
   review [--minutes N] [--count N]
                                   只复习到期词条
   stats                           查看学习统计
   audio <WORD> [--accent uk|us]   播放单词发音
   config [show | set KEY VALUE | reset [KEY]]
-                                  查看或修改配置及数据目录；reset 恢复默认值（规划中）
+                                  查看或修改配置及数据目录；reset 恢复默认值
   links [status|install|uninstall]
                                   可点击查词结果（Windows）
   export <PATH>                   导出（.json 完整备份 / .csv 词表）
   import <PATH>                   导入（.json 备份 / 含 word 列的 .csv）
-  mcp                             以 MCP 服务器方式运行（stdio），供 AI agent 调用（规划中）
+  mcp                             以 MCP 服务器方式运行（stdio），供 AI agent 调用
 ```
 
-不带 `--minutes` 或 `--count` 时，会话时长为 `default_minutes`（默认 5 分钟）。规划中：从首页或默认命令开始、且今天还没达成 `daily_goal` 时，改为一直练到今天练过的不同单词数达到目标为止（见下文"每日学习目标"）。
+不带 `--minutes` 或 `--count` 时，会话时长为 `default_minutes`（默认 5 分钟）。从首页或默认命令开始、且今天还没达成 `daily_goal` 时，改为一直练到今天练过的不同单词数达到目标为止（见下文"每日学习目标"）。
 
 配置项（`config.json`）。下表中的每一项都由用户自己决定，默认值只是第一次使用时的起点：
 
 | 键 | 默认值 | 允许范围 | 含义 |
 |---|---|---|---|
-| `daily_goal` | 10 | 0–500，0 表示不设目标 | 每天的学习目标：当天练习过的单词数量（规划中） |
+| `daily_goal` | 10 | 0–500，0 表示不设目标 | 每天的学习目标：当天练习过的单词数量 |
 | `daily_new_limit` | 10 | 0–200，0 表示只复习不学新词 | 每天最多引入的新词数 |
 | `default_minutes` | 5 | 1–120 | 默认会话时长（分钟） |
 | `http_timeout_secs` | 10 | 1–120 | 一次查词（含全部请求）的总超时 |
 | `accent` | `UK` | `uk` / `us` | 默认播放的口音 |
-| `mcp_daily_add_limit` | 30 | 0–200，0 表示禁止 agent 收藏 | 每天最多允许 agent 通过 MCP 新收藏的单词数（规划中） |
+| `mcp_daily_add_limit` | 30 | 0–200，0 表示禁止 agent 收藏 | 每天最多允许 agent 通过 MCP 新收藏的单词数 |
 
 旧版本的 `dictionary_source`、`free_dictionary_url`、`merriam_webster_key` 等配置项已移除：读取时忽略，下次保存时丢弃；尝试 `config set` 会提示“现在始终使用 Wiktionary”。
 
 #### 用户如何设置
 
-1. **全屏设置界面（规划中）：** 首页按 `c` 打开，上表所有配置项都能在这里修改，不需要退出全屏界面或另开终端，详见下文"全屏设置界面"。
-2. **命令行：** `config set KEY VALUE` 修改单项。目前已支持 `daily_new_limit`、`default_minutes`、`http_timeout_secs`、`accent`；规划中补上 `daily_goal` 和 `mcp_daily_add_limit`，并统一按上表范围校验。`config reset KEY` 恢复单项默认值，`config reset` 恢复全部（会先确认）；`config show` 列出所有项、当前值和默认值。
+1. **全屏设置界面：** 首页按 `c` 打开，上表所有配置项都能在这里修改，不需要退出全屏界面或另开终端，详见下文"全屏设置界面"。
+2. **命令行：** `config set KEY VALUE` 修改单项，上表所有键都支持，统一按上表范围校验。`config reset KEY` 恢复单项默认值，`config reset` 恢复全部（会先确认）；`config show` 列出所有项、当前值和默认值。
 3. **直接编辑 `config.json`：** 缺少的键使用默认值；值超出范围时启动时提示该项无效，并按最近的边界值运行（如 `daily_new_limit: 300` 按 200），不改写用户的文件；之后在设置界面或用 `config set` 修改任意一项时，才会把校正后的值一并写回。`daily_new_limit` 以前没有上限，按边界值而不是默认值运行，可以避免老用户的设置被悄悄改小。
 
-#### 全屏设置界面（规划中）
+#### 全屏设置界面
 
 ```text
 StealthLingo · Settings
@@ -317,7 +320,7 @@ Wiktionary 不是翻译服务。英语定义作为主要提示，用户可以用
 3. 本次会话答错的词在会话末尾再出现一次，不会无限重复。
 4. 听力模式只选择有可用音频的词条。
 
-## 8. MCP 接入：让 agent 推荐单词（规划中）
+## 8. MCP 接入：让 agent 推荐单词
 
 ### 目标
 
@@ -415,10 +418,10 @@ agent → 告诉用户：已加入 5 个词，会按每天 10 个新词的节奏
 ### 与现有模块的关系
 
 - 新增 `src/mcp/` 模块：`protocol.rs`（JSON-RPC 与 MCP 消息类型）、`server.rs`（读写循环、分发、版本协商）、`tools.rs`（工具定义、参数校验、结果组装）。
-- 现有 `commands::add::run` 直接 `println!`，不能在 MCP 模式下复用。把"查缓存或联网 → 收藏"抽成返回结构化结果的函数（如 `commands::add::add_word(ctx, word, options) -> AddReport`），CLI、TUI 和 MCP 共用；CLI 负责把结果打印成现在的文字。
-- `Database::add_to_collection` 增加参数：来源（`user` / `mcp`）和推荐理由。MCP 调用时笔记参数固定为空，不会写入或修改 `personal_note`；CLI `add --note` 保持现有行为。
-- `list_words` 返回的 `WordSummary` 增加 `lapses`、`added_via`，`get_study_status` 复用 `Database::stats`、`count_due`、`count_new_ready`。
-- 词典访问沿用 `cached_or_fetch`：已缓存的词不联网；未缓存的词逐个联网。整次 `add_words` 有 30 秒总预算，每个词的超时取 `http_timeout_secs` 与剩余预算中较小的值，保证整次调用不超过常见 MCP 客户端的工具调用超时（约 60 秒）；预算用完后剩余的词标为 `deferred`。
+- `commands::add::run` 的"查缓存或联网 → 收藏"抽成返回结构化结果的 `commands::add::add_word(ctx, word, note) -> AddReport`，CLI 负责把结果打印成文字；联网结果写缓存的部分抽成 `commands::store_fetched`，CLI 和 MCP 共用。
+- agent 收藏走单独的 `Database::add_from_agent(word_id, reason, daily_limit, …)`：在一个事务里依次检查已收藏、`dismissed_words`、当日额度，再写入 `user_words`（`added_via = 'mcp'`、`added_reason`）和 `mcp_add_log`。它没有笔记参数，不会写入或修改 `personal_note`；用户的 `add_to_collection` 保持原有行为，并清除该词的移除记录。
+- `list_words` 返回的 `WordSummary` 增加 `lapses`、`added_by_agent`、`added_reason`（以及词库筛选用的 `parts_of_speech`），`get_study_status` 复用 `Database::stats`、`count_due`、`count_new_ready`。
+- `lookup_word` 沿用 `cached_or_fetch`。`add_words` 对已缓存的词不联网；未缓存的词直接调用词典客户端，以区分 `not_found` 与 `network_error`。整次 `add_words` 有 30 秒总预算，每个词的超时取 `http_timeout_secs` 与剩余预算中较小的值，保证整次调用不超过常见 MCP 客户端的工具调用超时（约 60 秒）；剩余预算不足 1 秒时其余未缓存的词标为 `deferred`。已达到当日额度时不再联网，直接返回 `limit_reached`。
 - 用户移除单词时（`remove` 命令、词库界面、链接移除）在 `dismissed_words` 中记一笔；用户自己再次 `add` 时清除这条记录。`add_words` 遇到有记录的词直接返回 `dismissed`，不联网、不恢复归档的学习进度。
 
 ### 安全与边界
@@ -429,13 +432,13 @@ agent → 告诉用户：已加入 5 个词，会按每天 10 个新词的节奏
 - **防止失控循环：** 每次最多 20 个词，每天最多 `mcp_daily_add_limit` 个新收藏。额度按 `mcp_add_log` 中今天（本地日期）的记录数统计：每个 `added` 结果追加一条，之后即使用户删掉这个词也不会退回额度；`already_saved`、`dismissed` 等未加入的结果不计数。这个上限由用户在设置界面或 `config set` 中调整，设为 0 即关闭 agent 收藏。
 - **不淹没学习：** agent 加入的词状态为 `new`，仍受用户设置的 `daily_new_limit` 控制进入学习的速度，不会一次性挤占复习任务。
 - **来源可见：** 词库界面给 agent 加入的词显示 `agent` 标记，详情里显示推荐理由；`words` 命令输出加一列来源。
-- **并发：** MCP 服务器和 TUI / CLI 是独立进程，共用同一个 SQLite 文件。依赖已有的 5 秒 `busy_timeout`，并考虑开启 WAL 减少读写互斥；TUI 回到首页或进入词库时重新读取数据，让 agent 刚加入的词及时出现。
+- **并发：** MCP 服务器和 TUI / CLI 是独立进程，共用同一个 SQLite 文件。依赖已有的 5 秒 `busy_timeout`（暂未开启 WAL，出现锁等待问题时再考虑）；TUI 回到首页或进入词库时重新读取数据，让 agent 刚加入的词及时出现。
 - **只在本机：** 只支持 stdio，由本地客户端拉起，不监听任何网络端口。
 
 ### 测试
 
 - `tests/mcp_tests.rs`：用内存中的输入输出驱动服务器循环，覆盖初始化与版本协商、`tools/list`、未知方法、参数错误、通知不回复。
-- 用 fixtures 预先写入词典缓存，测试 `add_words` 的 `added` / `already_saved` / `dismissed` / `invalid` / `limit_reached`；验证用户 `remove`（包括链接归档）后 agent 再加入返回 `dismissed`、用户自己 `add` 后恢复正常；验证删掉 agent 今天加的词后额度不会退回；验证带 `note` 等未知字段的调用被拒绝，`personal_note` 不被改动，`reason` 不出现在学习卡片和拼写题中；查无此词和联网失败通过可注入的词典客户端模拟，测试不访问网络。
+- 用 fixtures 预先写入词典缓存，测试 `add_words` 的 `added` / `already_saved` / `dismissed` / `invalid` / `limit_reached`；验证用户 `remove`（包括链接归档）后 agent 再加入返回 `dismissed`、用户自己 `add` 后恢复正常；验证删掉 agent 今天加的词后额度不会退回；验证带 `note` 等未知字段的调用被拒绝，`personal_note` 不被改动，`reason` 不出现在学习卡片和拼写题中；查无此词用本地回环上的测试服务器模拟，联网失败把 `Endpoints` 指向 `127.0.0.1:9`，测试不访问网络。迁移 005 的升级（保留进度、把旧归档记为移除）和 JSON 备份往返在 `tests/storage_tests.rs` / `tests/mcp_tests.rs` 中覆盖。
 - 手动验收：在 Cursor 中配置服务器，让 agent 从一段英文中推荐单词并加入，确认词库界面出现带 `agent` 标记的词，且第二天按 `daily_new_limit` 进入学习。
 
 ## 9. Rust 技术栈
@@ -472,7 +475,7 @@ stealthlingo/
 │   ├── 002_dictionary_sources.sql
 │   ├── 003_word_aliases.sql
 │   ├── 004_archived_words.sql
-│   └── 005_word_origin.sql       # 规划中：added_via、added_reason、dismissed_words、mcp_add_log
+│   └── 005_word_origin.sql      # added_via、added_reason、dismissed_words、mcp_add_log
 ├── src/
 │   ├── main.rs
 │   ├── lib.rs
@@ -498,15 +501,15 @@ stealthlingo/
 │   │   ├── database.rs          # 连接与版本化迁移
 │   │   ├── repository.rs
 │   │   └── backup.rs            # JSON 备份
-│   ├── mcp/                     # 规划中：MCP 服务器
+│   ├── mcp/                     # MCP 服务器
 │   │   ├── protocol.rs          # JSON-RPC 与 MCP 消息类型
 │   │   ├── server.rs            # stdio 读写循环、分发、版本协商
 │   │   └── tools.rs             # 工具定义、参数校验、结果组装
-│   └── tui/                     # home / study / words / lookup / stats / settings（规划中）等界面
+│   └── tui/                     # home / study / words / lookup / stats / settings 等界面
 └── tests/
     ├── commands_tests.rs
     ├── dictionary_tests.rs
-    ├── mcp_tests.rs             # 规划中
+    ├── mcp_tests.rs
     ├── scheduling_tests.rs
     ├── storage_tests.rs
     ├── tui_tests.rs
@@ -536,20 +539,20 @@ stealthlingo/
 - `personal_note`（个人中文释义或记忆提示）
 - `due_at`、`interval_days`、`repetitions`、`ease_factor`、`lapses`
 - `added_at`、`last_reviewed_at`
-- 规划中（迁移 `005_word_origin.sql`）：`added_via`（`user` / `mcp`，默认 `user`）、`added_reason`（agent 给出的推荐理由，可为空）
+- `added_via`（`user` / `mcp`，默认 `user`）、`added_reason`（agent 给出的推荐理由，可为空），由迁移 `005_word_origin.sql` 加入
 
 ### `archived_user_words`
 
 通过链接点击“Remove”移除的单词会连同排程状态归档。因为其他程序也能触发这些链接，这类移除可以恢复：再次收藏时还原进度。`remove` 命令则让该词从头开始。迁移 005 同时给这张表加上 `added_via`、`added_reason`，恢复时一并还原。
 
-### `dismissed_words`（规划中，迁移 005）
+### `dismissed_words`（迁移 005）
 
 - `word_id`、`dismissed_at`
-- 用户移除单词（`remove`、词库界面、链接移除）时写入，用户自己再次收藏时删除。MCP 的 `add_words` 遇到这里有记录的词返回 `dismissed`，不重新加入。
+- 用户移除单词（`remove`、词库界面、链接移除）时写入，用户自己再次收藏时删除。MCP 的 `add_words` 遇到这里有记录的词返回 `dismissed`，不重新加入。迁移时已归档的词也记为移除。JSON 备份（第 3 版）随词保存 `dismissed_at`。
 
-### `mcp_add_log`（规划中，迁移 005）
+### `mcp_add_log`（迁移 005）
 
-- `id`、`word_id`、`added_at`
+- `id`、`word_id`、`created_at`
 - agent 每成功加入一个词追加一条，只增不删，用于统计 `mcp_daily_add_limit` 的当日用量，用户删词不会退回额度。
 
 ### `practice_attempts`
@@ -583,8 +586,8 @@ stealthlingo/
 | 5. 统计与导入导出 | `stats`、JSON / CSV 导入导出、数据库迁移 | 完成 |
 | 6. 全屏界面 | ratatui TUI、老板键、英美音轮换、小终端自适应布局 | 完成，布局仍在打磨 |
 | 7. 发布 | dist 构建五个平台的二进制，生成 shell / PowerShell 安装脚本 | 完成 |
-| 8. 日常使用增强 | P1 待做项：缺字母拼写、错词重练、混合模式、词库筛选、每日学习目标、全屏设置界面与 `config reset` | 下一步 |
-| 9. MCP 接入 | 抽出结构化的收藏函数、迁移 005（来源、移除记录、agent 收藏日志）、`stealthlingo mcp` 与 4 个工具、词库界面显示来源、README 配置说明 | 规划中 |
+| 8. 日常使用增强 | 缺字母拼写、错词重练、混合模式、词库筛选、每日学习目标、全屏设置界面与 `config reset` | 完成 |
+| 9. MCP 接入 | 抽出结构化的收藏函数、迁移 005（来源、移除记录、agent 收藏日志）、`stealthlingo mcp` 与 4 个工具、词库界面显示来源、README 配置说明 | 完成 |
 
 ## 14. v0.1 发布清单
 

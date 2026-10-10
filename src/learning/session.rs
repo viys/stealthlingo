@@ -9,7 +9,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 
 use super::scheduling::{schedule, Grade, ScheduleState};
-use super::spelling::{is_correct_spelling, mask_word};
+use super::spelling::{is_correct_spelling, mask_word, missing_letters};
 use super::PracticeMode;
 use crate::audio::AudioPlayer;
 use crate::cli::StudyMode;
@@ -42,10 +42,12 @@ fn interrupted() -> bool {
 }
 
 impl StudyMode {
+    /// How answers in this mode are recorded. Missing-letter questions are
+    /// spelling questions with a hint.
     pub fn practice_mode(self) -> PracticeMode {
         match self {
-            Self::Memory => PracticeMode::Memory,
-            Self::Spelling => PracticeMode::Spelling,
+            Self::Memory | Self::Mixed => PracticeMode::Memory,
+            Self::Spelling | Self::Letters => PracticeMode::Spelling,
             Self::Listening => PracticeMode::ListeningSpelling,
         }
     }
@@ -54,14 +56,30 @@ impl StudyMode {
         match self {
             Self::Memory => "Memory",
             Self::Spelling => "Spelling",
+            Self::Letters => "Missing letters",
             Self::Listening => "Listening spelling",
+            Self::Mixed => "Mixed",
+        }
+    }
+
+    /// Whether the answer is typed rather than self-rated.
+    pub fn is_typed(self) -> bool {
+        matches!(self, Self::Spelling | Self::Letters | Self::Listening)
+    }
+
+    /// Words this mode can ask: listening needs audio, the spelling modes a
+    /// definition to show as the prompt.
+    fn can_ask(self, item: &StudyItem) -> bool {
+        match self {
+            Self::Memory | Self::Mixed => true,
+            Self::Spelling | Self::Letters => item.entry.primary_definition().is_some(),
+            Self::Listening => item.entry.audio_url().is_some(),
         }
     }
 }
 
 /// Picks the words for a session: due reviews first, then a limited number of
-/// never-studied words. Listening only uses words with audio; spelling needs a
-/// definition to show as the prompt.
+/// never-studied words, keeping only words the mode can ask.
 pub fn build_queue(
     db: &Database,
     mode: StudyMode,
@@ -79,19 +97,46 @@ pub fn build_queue(
             queue.extend(db.new_items(allowance, audio_only)?);
         }
     }
-    if mode == StudyMode::Spelling {
-        queue.retain(|item| item.entry.primary_definition().is_some());
-    }
+    queue.retain(|item| mode.can_ask(item));
     Ok(queue)
 }
 
-#[derive(Debug, Clone)]
+/// How far back `--mistakes` looks for wrong answers.
+pub const MISTAKE_DAYS: i64 = 30;
+
+/// Saved words answered wrong in the last [`MISTAKE_DAYS`] days or forgotten
+/// after being learned (`lapses`), most recent mistake first, whether or not
+/// they are due.
+pub fn build_mistake_queue(
+    db: &Database,
+    mode: StudyMode,
+    now: DateTime<Utc>,
+) -> Result<Vec<StudyItem>> {
+    let since = now - chrono::Duration::days(MISTAKE_DAYS);
+    let mut queue = db.mistake_items(since, mode == StudyMode::Listening)?;
+    queue.retain(|item| mode.can_ask(item));
+    Ok(queue)
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct SessionPlan {
     pub mode: StudyMode,
     pub time_limit: Option<Duration>,
     pub max_answers: Option<usize>,
     /// Accent of the recordings played by default ("UK" or "US").
     pub accent: String,
+    /// Different words to practise today; 0 means no goal.
+    pub daily_goal: usize,
+    /// Words already answered today before this session started.
+    pub practised_today: HashSet<i64>,
+    /// End the session once the daily goal is reached instead of on a timer.
+    /// Answers count, not questions: a missed word asked again at the end
+    /// adds nothing.
+    pub until_goal: bool,
+    /// The queue holds every saved word that can be practised today; false
+    /// for reviews, mistakes and modes that skip some words, which can run
+    /// out while other words are still available.
+    pub whole_list: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -101,6 +146,10 @@ pub struct SessionSummary {
     pub skipped: usize,
     pub stopped_early: bool,
     pub time_up: bool,
+    /// The session ended because today's goal was reached.
+    pub goal_done: bool,
+    /// Today's goal was reached by an answer in this session.
+    pub goal_reached_now: bool,
     /// Words answered wrong at least once, in the order they were missed.
     pub missed: Vec<String>,
 }
@@ -119,16 +168,22 @@ pub struct Session {
     plan: SessionPlan,
     queue: VecDeque<StudyItem>,
     retried: HashSet<i64>,
+    /// Words answered today, including before this session.
+    practised: HashSet<i64>,
     summary: SessionSummary,
     started: Instant,
     paused_for: Duration,
     paused_at: Option<Instant>,
     shown: usize,
+    /// How the current question is asked; differs per word in mixed practice.
+    current_mode: StudyMode,
 }
 
 impl Session {
     pub fn new(plan: SessionPlan, queue: Vec<StudyItem>) -> Self {
         Self {
+            current_mode: plan.mode,
+            practised: plan.practised_today.clone(),
             plan,
             queue: queue.into(),
             retried: HashSet::new(),
@@ -156,10 +211,61 @@ impl Session {
     /// Questions still to come, including the current one.
     pub fn remaining(&self) -> usize {
         let queued = self.queue.len() + 1;
-        match self.plan.max_answers {
+        let queued = match self.plan.max_answers {
             Some(max) => max.saturating_sub(self.summary.answered).min(queued),
             None => queued,
+        };
+        if self.plan.until_goal {
+            queued.min(self.words_to_go().max(1))
+        } else {
+            queued
         }
+    }
+
+    /// Different words answered today, this session included.
+    pub fn words_today(&self) -> usize {
+        self.practised.len()
+    }
+
+    /// Words still missing from today's goal.
+    pub fn words_to_go(&self) -> usize {
+        self.plan.daily_goal.saturating_sub(self.words_today())
+    }
+
+    fn goal_reached(&self) -> bool {
+        self.plan.daily_goal > 0 && self.words_to_go() == 0
+    }
+
+    /// A line about today's goal for the end of the session, if one is set.
+    pub fn goal_message(&self) -> Option<String> {
+        let goal = self.plan.daily_goal;
+        if goal == 0 {
+            return None;
+        }
+        let done = self.words_today();
+        if self.summary.goal_reached_now {
+            return Some(format!(
+                "Daily goal reached: {done} {} today (goal {goal}). Keep going any time.",
+                if done == 1 { "word" } else { "words" }
+            ));
+        }
+        if done >= goal {
+            return Some(format!("Today: {done} / {goal} words · goal reached"));
+        }
+        let short = goal - done;
+        let words = if short == 1 { "word" } else { "words" };
+        if self.plan.until_goal
+            && self.plan.whole_list
+            && self.queue.is_empty()
+            && !self.summary.stopped_early
+            && !self.summary.time_up
+        {
+            return Some(format!(
+                "Nothing left to practise today, {short} {words} short of the goal. \
+                 Raise daily_new_limit or save more words."
+            ));
+        }
+        Some(format!("Today: {done} / {goal} words · {short} to go."))
     }
 
     pub fn queue_is_empty(&self) -> bool {
@@ -201,13 +307,44 @@ impl Session {
         {
             return None;
         }
+        if self.plan.until_goal && self.goal_reached() {
+            self.summary.goal_done = true;
+            return None;
+        }
         if self.time_left() == Some(Duration::ZERO) {
             self.summary.time_up = true;
             return None;
         }
         let item = self.queue.pop_front()?;
         self.shown += 1;
+        self.current_mode = self.pick_mode(&item);
         Some(item)
+    }
+
+    /// How the current question is asked.
+    pub fn current_mode(&self) -> StudyMode {
+        self.current_mode
+    }
+
+    /// Mixed practice shows new words as flashcards first; later it rotates
+    /// through the modes the word supports.
+    fn pick_mode(&self, item: &StudyItem) -> StudyMode {
+        if self.plan.mode != StudyMode::Mixed {
+            return self.plan.mode;
+        }
+        if item.schedule.status == crate::learning::Status::New {
+            return StudyMode::Memory;
+        }
+        let options: Vec<StudyMode> = [
+            StudyMode::Memory,
+            StudyMode::Spelling,
+            StudyMode::Letters,
+            StudyMode::Listening,
+        ]
+        .into_iter()
+        .filter(|mode| mode.can_ask(item))
+        .collect();
+        options[(item.word_id.unsigned_abs() as usize + self.shown) % options.len()]
     }
 
     /// Stores an answer and returns the new schedule. A missed word comes back
@@ -224,7 +361,7 @@ impl Session {
         db.record_attempt(
             &NewAttempt {
                 word_id: item.word_id,
-                mode: self.plan.mode.practice_mode(),
+                mode: self.current_mode.practice_mode(),
                 expected: &item.entry.word,
                 submitted: answer.submitted.as_deref(),
                 is_correct: answer.is_correct,
@@ -235,6 +372,11 @@ impl Session {
             now,
         )?;
         self.summary.answered += 1;
+        let before = self.goal_reached();
+        self.practised.insert(item.word_id);
+        if !before && self.goal_reached() {
+            self.summary.goal_reached_now = true;
+        }
         if answer.is_correct {
             self.summary.correct += 1;
         } else if !self.summary.missed.contains(&item.entry.word) {
@@ -254,6 +396,19 @@ impl Session {
     /// Ends the session before the queue is done.
     pub fn stop(&mut self) {
         self.summary.stopped_early = true;
+    }
+}
+
+/// "9 letters", "2 words, 8 letters", or with `blanks` the word with some
+/// letters missing.
+pub fn spelling_hint(word: &str, blanks: bool) -> String {
+    if blanks {
+        return missing_letters(word);
+    }
+    let letters = word.chars().filter(|c| c.is_alphabetic()).count();
+    match word.split_whitespace().count() {
+        n if n > 1 => format!("{n} words, {letters} letters"),
+        _ => format!("{letters} letters"),
     }
 }
 
@@ -388,9 +543,10 @@ fn session_loop(
             accent: &plan.accent,
         };
         let asked_at = Instant::now();
-        let outcome = match plan.mode {
-            StudyMode::Memory => ask_memory(&question)?,
-            StudyMode::Spelling => ask_spelling(&question)?,
+        let outcome = match session.current_mode() {
+            StudyMode::Memory | StudyMode::Mixed => ask_memory(&question)?,
+            StudyMode::Spelling => ask_spelling(&question, false)?,
+            StudyMode::Letters => ask_spelling(&question, true)?,
             StudyMode::Listening => ask_listening(&question)?,
         };
 
@@ -413,9 +569,15 @@ fn session_loop(
     if summary.time_up {
         println!();
         println!("Time's up.");
+    } else if summary.goal_done {
+        println!();
+        println!("That's today's goal.");
     } else if session.queue_is_empty() && !summary.stopped_early {
         println!();
         println!("All done for now.");
+    }
+    if let Some(line) = session.goal_message() {
+        println!("{line}");
     }
     Ok(summary)
 }
@@ -424,7 +586,7 @@ fn print_header(session: &Session) {
     println!();
     let mut header = format!(
         "{} · #{} · {} left",
-        session.plan().mode.label(),
+        session.current_mode().label(),
         session.shown(),
         session.remaining()
     );
@@ -573,16 +735,12 @@ fn judge(q: &Question<'_>, attempt: std::result::Result<String, Outcome>) -> Out
     outcome
 }
 
-fn ask_spelling(q: &Question<'_>) -> Result<Outcome> {
+/// Shows the definition with the word masked; `blanks` adds the word with
+/// some letters missing.
+fn ask_spelling(q: &Question<'_>, blanks: bool) -> Result<Outcome> {
     let entry = &q.item.entry;
     print_details(entry, q.item.note.as_deref(), true);
-    let letters = entry.word.chars().filter(|c| c.is_alphabetic()).count();
-    let words = entry.word.split_whitespace().count();
-    if words > 1 {
-        println!("Hint: {words} words, {letters} letters");
-    } else {
-        println!("Hint: {letters} letters");
-    }
+    println!("Hint: {}", spelling_hint(&entry.word, blanks));
     let attempt = read_spelling(q, false)?;
     Ok(judge(q, attempt))
 }
