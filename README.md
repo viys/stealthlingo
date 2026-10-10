@@ -13,9 +13,11 @@ English is the only supported language in v0.1.
 
 ## Install
 
-Prebuilt programs for Windows, macOS and Linux are on the
+Prebuilt programs for Windows (x64), macOS (Intel and Apple silicon) and Linux
+(x64 and ARM64) are on the
 [Releases page](https://github.com/viys/stealthlingo/releases); no Rust needed.
-The installers put `stealthlingo` in `~/.cargo/bin` and add it to your `PATH`.
+The installers put `stealthlingo` and its link helper `stealthlingo-link` in
+`~/.cargo/bin` and add that folder to your `PATH`.
 
 Windows (PowerShell):
 
@@ -58,7 +60,9 @@ stealthlingo                           # open the full-screen app: practice, loo
 
 In a terminal, `stealthlingo`, `study` and `review` open a full-screen interface.
 The home screen shows what is due today and a menu (`r` review, `s` flashcards,
-`p` spelling, `l` listening, `/` look up, `w` word list, `t` stats, `q` quit).
+`p` spelling, `l` listening, `/` look up, `w` word list, `t` stats, `q` quit);
+`↑`/`↓` (or `k`/`j`) and `Enter` work too. Lists and long pages scroll with the
+same keys.
 
 - **Esc hides everything instantly** and shows the shell you started from; press
   Esc again to come back. The session clock pauses while hidden.
@@ -72,11 +76,16 @@ The home screen shows what is due today and a menu (`r` review, `s` flashcards,
   the recording and `Ctrl+R` plays the other accent. A wrong answer shows which
   letters were extra or missing.
 - **Word list**: `/` filters, `Enter` opens the saved entry (offline), `a` plays it,
-  `n` edits the note, `d` removes the word (saving it again restores its progress).
+  `n` edits the note, `d` then `y` removes the word (saving it again restores its
+  progress). `PgUp`/`PgDn` and `g`/`G` jump through long lists.
 - **Look up**: type a word and press `Enter`; then `s` saves or removes it, `Tab`
-  switches between the brief and the full entry.
+  switches between the brief and the full entry, `/` starts a new lookup and
+  `q` goes back.
 - `Ctrl+C` ends the current session, cancels a filter or note, and otherwise quits.
   Every answer is saved as soon as it is given.
+- The interface needs a terminal of at least 40×12 characters. In short windows the
+  boxes shrink, the home summary fits on one line and the menu scrolls, so the
+  selected item and the answer field stay visible.
 
 `--plain` (or any non-terminal input/output, such as a pipe) uses the line-by-line
 prompts described below instead. `NO_COLOR` turns colors off.
@@ -93,7 +102,7 @@ prompts described below instead. `NO_COLOR` turns colors off.
 | `search <QUERY>` | Search saved words and notes |
 | `study [--mode memory\|spelling\|listening] [--minutes N] [--count N]` | Study session |
 | `review [--count N] [--minutes N]` | Flashcard review of due words only |
-| `stats` | Saved words, due count, today's answers and accuracy |
+| `stats` | Saved words by status, due count, today's and all-time answers with accuracy, next review |
 | `audio <WORD> [--accent uk\|us]` | Play the pronunciation (default: the `accent` setting) |
 | `config` / `config set <KEY> <VALUE>` | Show or change settings and data locations |
 | `links [status\|install\|uninstall]` | Ctrl+click in `lookup` to play pronunciations and add or remove words (Windows) |
@@ -183,8 +192,8 @@ Wikimedia Commons recordings (OGG) from the page source. When the typed form and
 the dictionary headword differ (`Ephemeral` and `ephemeral`), the typed form is
 remembered, so `add` and `remove` refer to the same saved word.
 
-Older versions could also use the Free Dictionary API or Merriam-Webster. Words
-cached from those are still readable offline, and are replaced with Wiktionary
+Development builds from before the v0.1.0 release could also use the Free
+Dictionary API or Merriam-Webster. Words cached from those are still readable offline, and are replaced with Wiktionary
 data the next time they are looked up (study progress and notes are kept). Their
 old settings in `config.json` are ignored.
 
@@ -208,7 +217,7 @@ migrations), `config.json`, and `audio/` (downloaded pronunciation files).
 stealthlingo export backup.json   # everything: cache, progress, answer history
 stealthlingo import backup.json   # merge; re-importing the same file changes nothing
 stealthlingo export words.csv     # word, note, status, due_at, definition
-stealthlingo import examples/words.csv   # needs a "word" column; "note" is optional
+stealthlingo import examples/words.csv   # "word" column (else the first one); "note" is optional
 ```
 
 When the same word exists on both sides of a JSON import, the most recently
@@ -243,7 +252,7 @@ cargo fmt --check
 ```
 
 The code is split into `dictionary` (Wiktionary client and parsers mapped to an
-`Entry` model, plus a decoder for data cached by v0.1), `storage` (SQLite),
+`Entry` model, plus a decoder for data cached by pre-release builds), `storage` (SQLite),
 `learning` (scheduling, answer checking, sessions), `audio`, `commands` and `tui`
 (the full-screen interface, built with ratatui). Both interfaces drive the same
 `learning::session::Session`.
