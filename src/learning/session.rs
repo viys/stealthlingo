@@ -174,6 +174,8 @@ pub struct Session {
     started: Instant,
     paused_for: Duration,
     paused_at: Option<Instant>,
+    /// Study time frozen when the session ended.
+    ended: Option<Duration>,
     shown: usize,
     /// How the current question is asked; differs per word in mixed practice.
     current_mode: StudyMode,
@@ -191,6 +193,7 @@ impl Session {
             started: Instant::now(),
             paused_for: Duration::ZERO,
             paused_at: None,
+            ended: None,
             shown: 0,
         }
     }
@@ -274,6 +277,9 @@ impl Session {
 
     /// Study time so far, not counting pauses.
     pub fn elapsed(&self) -> Duration {
+        if let Some(ended) = self.ended {
+            return ended;
+        }
         let paused = self.paused_for + self.paused_at.map_or(Duration::ZERO, |at| at.elapsed());
         self.started.elapsed().saturating_sub(paused)
     }
@@ -292,6 +298,13 @@ impl Session {
     pub fn resume(&mut self) {
         if let Some(at) = self.paused_at.take() {
             self.paused_for += at.elapsed();
+        }
+    }
+
+    /// Stops the clock for good once the results are shown.
+    pub fn stop_clock(&mut self) {
+        if self.ended.is_none() {
+            self.ended = Some(self.elapsed());
         }
     }
 

@@ -110,6 +110,7 @@ impl Study {
     }
 
     fn finish(&mut self, ctx: &Context) {
+        self.session.stop_clock();
         let summary = self.session.summary();
         let reason = if summary.time_up {
             "Time's up"
@@ -625,13 +626,10 @@ impl View for Study {
         if matches!(self.stage, Stage::Card(_)) {
             return self.card_key(ctx, key, fx);
         }
+        // `q` and Space answer or end a card, so a repeated press must not
+        // skip past the results.
         match key.code {
-            KeyCode::Enter
-            | KeyCode::Char(' ')
-            | KeyCode::Char('h')
-            | KeyCode::Char('l')
-            | KeyCode::Char('L')
-            | KeyCode::Char('q') => fx.go(Target::Home),
+            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('L') => fx.go(Target::Home),
             KeyCode::Char('r') => fx.go(Target::Session(self.request)),
             _ => {}
         }
@@ -639,11 +637,12 @@ impl View for Study {
     }
 
     fn interrupt(&mut self, ctx: &mut Context, _fx: &mut Fx) -> Result<bool> {
-        if matches!(self.stage, Stage::Card(_)) {
+        let typing =
+            matches!(&self.stage, Stage::Card(card) if matches!(card.phase, Phase::Typing(_)));
+        if typing {
             self.end(ctx);
-            return Ok(true);
         }
-        Ok(false)
+        Ok(typing)
     }
 
     fn set_paused(&mut self, paused: bool) {

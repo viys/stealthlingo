@@ -131,7 +131,7 @@ fn menu_keys_keep_the_highlight_when_nothing_can_start() {
     // `l` confirms the highlighted item, so it retries listening.
     press(&mut app, &mut ctx, KeyCode::Char('l'));
     let home = screen(&mut app);
-    assert!(home.contains("Home"), "{home}");
+    assert!(home.contains("Practice"), "{home}");
     assert!(app.flash_text().unwrap().contains("listening practice"));
 }
 
@@ -148,21 +148,40 @@ fn short_terminals_show_the_whole_home_menu() {
 }
 
 #[test]
-fn home_menu_scrolls_to_the_highlighted_item() {
+fn practice_modes_live_in_a_submenu() {
     let dir = tempfile::tempdir().unwrap();
-    let mut ctx = context(&dir, false);
+    let mut ctx = context(&dir, true);
     let mut app = App::new(&mut ctx, Start::Home).unwrap();
-    // Too narrow for two columns.
-    let home = screen_sized(&mut app, 60, 12);
-    assert!(home.contains("Your word list is empty"), "{home}");
-    assert!(!home.contains("Settings"), "{home}");
+    let home = screen_sized(&mut app, 40, 12);
+    assert!(home.contains("› a  Practice"), "{home}");
+    assert!(home.contains("c  Settings"), "{home}");
+    assert!(!home.contains("Flashcards"), "{home}");
+
+    press(&mut app, &mut ctx, KeyCode::Enter);
+    let practice = screen_sized(&mut app, 40, 12);
+    assert!(practice.contains("Practice"), "{practice}");
+    assert!(practice.contains("› s  Flashcards"), "{practice}");
+    assert!(practice.contains("e  Retry mistakes"), "{practice}");
+    assert!(!practice.contains("Settings"), "{practice}");
 
     press(&mut app, &mut ctx, KeyCode::Up);
-    press(&mut app, &mut ctx, KeyCode::Up);
-    let home = screen_sized(&mut app, 60, 12);
-    assert!(home.contains("› c  Settings"), "{home}");
-    let small = screen_sized(&mut app, 40, 12);
-    assert!(small.contains("› c  Settings"), "{small}");
+    let practice = screen_sized(&mut app, 40, 12);
+    assert!(practice.contains("› e  Retry mistakes"), "{practice}");
+
+    // `h` goes back with the Practice entry still highlighted.
+    press(&mut app, &mut ctx, KeyCode::Char('h'));
+    let home = screen_sized(&mut app, 40, 12);
+    assert!(home.contains("› a  Practice"), "{home}");
+    assert!(!app.should_quit());
+}
+
+#[test]
+fn practice_shortcuts_start_straight_from_home() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    press(&mut app, &mut ctx, KeyCode::Char('s'));
+    assert!(screen(&mut app).contains("ephemeral"));
 }
 
 #[test]
@@ -298,8 +317,71 @@ fn ctrl_c_ends_the_session_without_recording_the_open_question() {
     assert!(screen(&mut app).contains("Session ended"));
     assert_eq!(answers(&ctx), 0);
 
+    // Nothing is being typed on the results, so Ctrl+C quits.
     app.handle_key(&mut ctx, ctrl_c);
     assert!(app.should_quit());
+}
+
+#[test]
+fn repeated_keys_stay_on_the_summary() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, session(StudyMode::Memory)).unwrap();
+
+    press(&mut app, &mut ctx, KeyCode::Char('q'));
+    for key in [KeyCode::Char('q'), KeyCode::Char(' '), KeyCode::Char('h')] {
+        press(&mut app, &mut ctx, key);
+    }
+    assert!(!app.should_quit());
+    let summary = screen(&mut app);
+    assert!(summary.contains("Session ended"), "{summary}");
+
+    press(&mut app, &mut ctx, KeyCode::Enter);
+    assert!(!screen(&mut app).contains("Session ended"));
+}
+
+#[test]
+fn ctrl_c_goes_back_only_while_typing_and_quits_elsewhere() {
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+
+    // Typing a lookup: back to the home screen.
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    press(&mut app, &mut ctx, KeyCode::Char('/'));
+    app.handle_key(&mut ctx, ctrl_c);
+    assert!(!app.should_quit());
+    assert!(screen(&mut app).contains("Review due words"));
+
+    // Screens without a text field quit.
+    for keys in [&['a'][..], &['w'], &['t'], &['c'], &['s']] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ctx = context(&dir, true);
+        let mut app = App::new(&mut ctx, Start::Home).unwrap();
+        for key in keys {
+            press(&mut app, &mut ctx, KeyCode::Char(*key));
+        }
+        app.handle_key(&mut ctx, ctrl_c);
+        assert!(app.should_quit(), "{keys:?}");
+    }
+}
+
+#[test]
+fn the_summary_clock_stops_when_the_session_ends() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, session(StudyMode::Memory)).unwrap();
+
+    press(&mut app, &mut ctx, KeyCode::Char('q'));
+    let time_line = |text: &str| {
+        text.lines()
+            .find(|line| line.contains("Time"))
+            .unwrap()
+            .to_string()
+    };
+    let before = time_line(&screen(&mut app));
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    assert_eq!(time_line(&screen(&mut app)), before);
 }
 
 #[test]
@@ -622,6 +704,7 @@ fn word_list_filters_and_removes_words() {
         KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
     );
     assert!(!app.should_quit(), "Ctrl+C clears the filter first");
+    assert!(screen(&mut app).contains("Word list (1)"));
 
     press(&mut app, &mut ctx, KeyCode::Char('d'));
     assert!(screen(&mut app).contains("Remove \"ephemeral\"?"));

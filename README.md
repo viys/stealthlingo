@@ -66,11 +66,13 @@ stealthlingo                           # open the full-screen app: practice, loo
 
 In a terminal, `stealthlingo`, `study` and `review` open a full-screen interface.
 The home screen shows what is due today, your progress toward the daily goal and
-a menu (`r` review, `s` flashcards, `p` spelling, `m` missing letters,
-`i` listening, `x` mixed, `e` retry mistakes, `/` look up, `w` word list,
-`t` stats, `c` settings); `↑`/`↓` (or `k`/`j`) move, and `Enter`
-or `l` confirms. Lists and long pages scroll with the same keys. While typing
-a word, a note, or a filter, `l` is a letter and `Enter` confirms.
+a menu (`r` review, `a` practice, `/` look up, `w` word list, `t` stats,
+`c` settings); `↑`/`↓` (or `k`/`j`) move, and `Enter` or `l` confirms.
+Practice opens a submenu with every practice mode (`s` flashcards, `p` spelling,
+`m` missing letters, `i` listening, `x` mixed, `e` retry mistakes); `h` or
+`Backspace` goes back. These keys also start a practice straight from the home
+screen. Lists and long pages scroll with the same keys. While typing a word,
+a note, or a filter, `l` is a letter and `Enter` confirms.
 
 ![Esc hides the app and shows the shell; Esc again brings it back](docs/images/boss-key.webp)
 
@@ -100,8 +102,11 @@ a word, a note, or a filter, `l` is a letter and `Enter` confirms.
 - **Look up**: type a word and press `Enter`; then `s` saves or removes it, `a`
   plays it, `Tab` switches between the brief and the full entry, `/` starts a
   new lookup and `q` goes back.
-- `Ctrl+C` ends the current session, cancels a filter or note, and otherwise quits.
-  It is the only way to quit, so an extra `q` never closes the app.
+- `Ctrl+C` goes back only while you are typing: in spelling, missing-letter or
+  listening practice it ends the session, and in the lookup box, a word-list
+  filter or note, or a settings value it cancels the input. Everywhere else it
+  quits. It is the only way to quit, so an extra `q` never closes the app.
+  On a session's results `q` and `Space` do nothing; `Enter` or `l` goes home.
   Every answer is saved as soon as it is given.
 - The interface needs a terminal of at least 40×12 characters. In short windows the
   boxes shrink, the home summary fits on one line and the menu splits into two
@@ -200,7 +205,9 @@ they are due. It works with every mode; on the home screen, `e` uses mixed
 practice.
 
 In every mode `s` skips the current word without recording an answer and `q` ends
-the session. Ctrl+C also ends the session; a second Ctrl+C exits immediately.
+the session. While you type an answer, Ctrl+C also ends the session; on a
+flashcard or the results it quits, and with `--plain` a second Ctrl+C exits
+immediately.
 Every submitted answer is saved right away, so quitting never loses finished work,
 and an unanswered question is never recorded as wrong.
 

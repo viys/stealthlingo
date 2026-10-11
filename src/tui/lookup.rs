@@ -315,7 +315,10 @@ impl View for Lookup {
     }
 
     fn interrupt(&mut self, _ctx: &mut Context, fx: &mut Fx) -> Result<bool> {
-        if self.editing && self.result.is_some() {
+        if !self.editing {
+            return Ok(false);
+        }
+        if self.result.is_some() {
             self.editing = false;
         } else {
             fx.go(self.back.clone());

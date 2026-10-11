@@ -18,6 +18,7 @@ use crate::time::{describe_due, local_day_start};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Item {
     Review,
+    Practice,
     Study(StudyMode),
     Mistakes,
     Lookup,
@@ -26,19 +27,26 @@ enum Item {
     Settings,
 }
 
+type Menu = [(char, &'static str, Item)];
+
 /// Quitting is Ctrl+C only, so a stray key can never close the app.
-const MENU: [(char, &str, Item); 11] = [
+const MAIN: [(char, &str, Item); 6] = [
     ('r', "Review due words", Item::Review),
-    ('s', "Study · flashcards", Item::Study(StudyMode::Memory)),
+    ('a', "Practice ›", Item::Practice),
+    ('/', "Look up a word", Item::Lookup),
+    ('w', "Word list", Item::Words),
+    ('t', "Stats", Item::Stats),
+    ('c', "Settings", Item::Settings),
+];
+
+/// The practice keys also work straight from the main menu.
+const PRACTICE: [(char, &str, Item); 6] = [
+    ('s', "Flashcards", Item::Study(StudyMode::Memory)),
     ('p', "Spelling practice", Item::Study(StudyMode::Spelling)),
     ('m', "Missing letters", Item::Study(StudyMode::Letters)),
     ('i', "Listening practice", Item::Study(StudyMode::Listening)),
     ('x', "Mixed practice", Item::Study(StudyMode::Mixed)),
     ('e', "Retry mistakes", Item::Mistakes),
-    ('/', "Look up a word", Item::Lookup),
-    ('w', "Word list", Item::Words),
-    ('t', "Stats", Item::Stats),
-    ('c', "Settings", Item::Settings),
 ];
 
 /// Body width from which a menu that does not fit is split into two columns.
@@ -53,7 +61,10 @@ pub struct Home {
     words_today: i64,
     daily_goal: u32,
     next_due: Option<DateTime<Utc>>,
+    /// Showing the practice submenu instead of the main menu.
+    in_practice: bool,
     selected: usize,
+    practice_selected: usize,
     /// First menu row shown when the menu does not fit.
     menu_offset: usize,
 }
@@ -77,18 +88,44 @@ impl Home {
             words_today: stats.words_today,
             daily_goal: ctx.config.daily_goal,
             next_due: stats.next_due,
+            in_practice: false,
             // Today's practice: reviews when something is due, otherwise new words.
             selected: if stats.due_now > 0 { 0 } else { 1 },
+            practice_selected: 0,
             menu_offset: 0,
         };
         Ok(home)
     }
 
-    fn activate(&self, item: Item, fx: &mut Fx) {
+    fn items(&self) -> &'static Menu {
+        if self.in_practice {
+            &PRACTICE
+        } else {
+            &MAIN
+        }
+    }
+
+    fn cursor(&mut self) -> &mut usize {
+        if self.in_practice {
+            &mut self.practice_selected
+        } else {
+            &mut self.selected
+        }
+    }
+
+    fn open_practice(&mut self, open: bool) {
+        if self.in_practice != open {
+            self.in_practice = open;
+            self.menu_offset = 0;
+        }
+    }
+
+    fn activate(&mut self, item: Item, fx: &mut Fx) {
         match item {
             Item::Review => fx.go(Target::Session(
                 SessionRequest::review(None, None).toward_goal(),
             )),
+            Item::Practice => self.open_practice(true),
             Item::Study(mode) => fx.go(Target::Session(
                 SessionRequest {
                     mode,
@@ -115,7 +152,7 @@ impl Home {
         match item {
             Item::Review if self.due > 0 => format!("{} due", self.due),
             Item::Review => "nothing due".to_string(),
-            Item::Study(_) if self.new_available > 0 => {
+            Item::Practice | Item::Study(_) if self.new_available > 0 => {
                 format!("{} new available", self.new_available)
             }
             Item::Words => format!("{} saved", self.saved),
@@ -231,23 +268,38 @@ impl Home {
 
 impl View for Home {
     fn title(&self) -> String {
-        "Home".to_string()
+        if self.in_practice {
+            "Practice".to_string()
+        } else {
+            "Home".to_string()
+        }
     }
 
     fn hints(&self) -> Vec<(&'static str, &'static str)> {
-        vec![("↑↓", "move"), ("Enter/l", "open"), ("^C", "quit")]
+        if self.in_practice {
+            vec![
+                ("↑↓", "move"),
+                ("Enter/l", "start"),
+                ("h", "back"),
+                ("^C", "quit"),
+            ]
+        } else {
+            vec![("↑↓", "move"), ("Enter/l", "open"), ("^C", "quit")]
+        }
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         // Short terminals get a tighter box, then a one-line summary, then a
         // menu in two columns when it is wide enough, or else a scrolling
         // menu, so the highlighted item is always on screen.
-        let columns = if area.height < MENU.len() as u16 + 2 && area.width >= TWO_COLUMNS_WIDTH {
+        let items = self.items();
+        let highlighted = *self.cursor();
+        let columns = if area.height < items.len() as u16 + 2 && area.width >= TWO_COLUMNS_WIDTH {
             2
         } else {
             1
         };
-        let menu_rows = MENU.len().div_ceil(columns) as u16;
+        let menu_rows = items.len().div_ceil(columns) as u16;
         let summary = self.summary();
         let rows = summary.len() as u16;
         let room = area.height.saturating_sub(menu_rows + 1);
@@ -277,11 +329,11 @@ impl View for Home {
             height: area.height.saturating_sub(top_height + gap),
             ..area
         };
-        let lines: Vec<Line> = MENU
+        let lines: Vec<Line> = items
             .iter()
             .enumerate()
             .map(|(i, (key, label, item))| {
-                let selected = i == self.selected;
+                let selected = i == highlighted;
                 let marker = if selected { " › " } else { "   " };
                 let mut line = Line::from(vec![
                     Span::styled(marker, theme::heading()),
@@ -306,9 +358,9 @@ impl View for Home {
         }
         self.menu_offset = widgets::scroll_to(
             self.menu_offset,
-            self.selected,
+            highlighted,
             menu.height as usize,
-            MENU.len(),
+            items.len(),
         );
         frame.render_widget(
             Paragraph::new(lines).scroll((self.menu_offset as u16, 0)),
@@ -317,20 +369,36 @@ impl View for Home {
     }
 
     fn handle_key(&mut self, _ctx: &mut Context, key: KeyEvent, fx: &mut Fx) -> Result<()> {
+        let items = self.items();
+        let len = items.len();
+        let current = items[*self.cursor()].2;
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.selected = (self.selected + MENU.len() - 1) % MENU.len();
+                let cursor = self.cursor();
+                *cursor = (*cursor + len - 1) % len;
             }
-            KeyCode::Down | KeyCode::Char('j') => self.selected = (self.selected + 1) % MENU.len(),
-            KeyCode::Enter | KeyCode::Char(' ') => self.activate(MENU[self.selected].2, fx),
+            KeyCode::Down | KeyCode::Char('j') => {
+                let cursor = self.cursor();
+                *cursor = (*cursor + 1) % len;
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => self.activate(current, fx),
+            KeyCode::Left | KeyCode::Backspace => self.open_practice(false),
             KeyCode::Char(c) => {
                 let c = c.to_ascii_lowercase();
                 // `l` confirms the highlighted item. Listening practice is `i`.
                 if c == 'l' {
-                    self.activate(MENU[self.selected].2, fx);
-                } else if let Some(i) = MENU.iter().position(|(k, _, _)| *k == c) {
+                    self.activate(current, fx);
+                } else if self.in_practice && (c == 'h' || c == 'q') {
+                    self.open_practice(false);
+                } else if let Some(i) = PRACTICE.iter().position(|(k, _, _)| *k == c) {
+                    // Highlighted in the submenu, so `l` retries when it cannot start.
+                    self.open_practice(true);
+                    self.practice_selected = i;
+                    self.activate(PRACTICE[i].2, fx);
+                } else if let Some(i) = MAIN.iter().position(|(k, _, _)| *k == c) {
+                    self.open_practice(false);
                     self.selected = i;
-                    self.activate(MENU[i].2, fx);
+                    self.activate(MAIN[i].2, fx);
                 }
             }
             _ => {}

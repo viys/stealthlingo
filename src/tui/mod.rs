@@ -174,7 +174,8 @@ trait View {
     fn render(&mut self, frame: &mut Frame, area: Rect);
     fn handle_key(&mut self, ctx: &mut Context, key: KeyEvent, fx: &mut Fx) -> Result<()>;
 
-    /// Ctrl+C. Returns false to let it quit the app.
+    /// Ctrl+C. Screens go back only while text is being typed; returning
+    /// false quits the app.
     fn interrupt(&mut self, _ctx: &mut Context, _fx: &mut Fx) -> Result<bool> {
         Ok(false)
     }
