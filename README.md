@@ -68,7 +68,7 @@ In a terminal, `stealthlingo`, `study` and `review` open a full-screen interface
 The home screen shows what is due today, your progress toward the daily goal and
 a menu (`r` review, `s` flashcards, `p` spelling, `m` missing letters,
 `i` listening, `x` mixed, `e` retry mistakes, `/` look up, `w` word list,
-`t` stats, `c` settings, `q` quit); `↑`/`↓` (or `k`/`j`) move, and `Enter`
+`t` stats, `c` settings); `↑`/`↓` (or `k`/`j`) move, and `Enter`
 or `l` confirms. Lists and long pages scroll with the same keys. While typing
 a word, a note, or a filter, `l` is a letter and `Enter` confirms.
 
@@ -101,6 +101,7 @@ a word, a note, or a filter, `l` is a letter and `Enter` confirms.
   plays it, `Tab` switches between the brief and the full entry, `/` starts a
   new lookup and `q` goes back.
 - `Ctrl+C` ends the current session, cancels a filter or note, and otherwise quits.
+  It is the only way to quit, so an extra `q` never closes the app.
   Every answer is saved as soon as it is given.
 - The interface needs a terminal of at least 40×12 characters. In short windows the
   boxes shrink, the home summary fits on one line and the menu splits into two

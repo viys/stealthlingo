@@ -51,7 +51,7 @@ stealthlingo                                # mở ứng dụng toàn màn hình
 
 ## Giao diện toàn màn hình
 
-Trong terminal, `stealthlingo`, `study` và `review` sẽ mở giao diện toàn màn hình. Màn hình chính cho biết hôm nay cần ôn gì, tiến độ mục tiêu hằng ngày và một menu (`r` ôn tập, `s` thẻ ghi nhớ, `p` chính tả, `m` điền chữ còn thiếu, `i` nghe, `x` luyện tập hỗn hợp, `e` luyện lại từ sai, `/` tra từ, `w` danh sách từ, `t` thống kê, `c` thiết lập, `q` thoát); `↑`/`↓` (hoặc `k`/`j`) để di chuyển, `Enter` hoặc `l` để xác nhận. Danh sách và các trang dài cuộn bằng cùng các phím đó. Khi đang gõ một từ, ghi chú hoặc bộ lọc, `l` là một chữ cái và `Enter` xác nhận.
+Trong terminal, `stealthlingo`, `study` và `review` sẽ mở giao diện toàn màn hình. Màn hình chính cho biết hôm nay cần ôn gì, tiến độ mục tiêu hằng ngày và một menu (`r` ôn tập, `s` thẻ ghi nhớ, `p` chính tả, `m` điền chữ còn thiếu, `i` nghe, `x` luyện tập hỗn hợp, `e` luyện lại từ sai, `/` tra từ, `w` danh sách từ, `t` thống kê, `c` thiết lập); `↑`/`↓` (hoặc `k`/`j`) để di chuyển, `Enter` hoặc `l` để xác nhận. Danh sách và các trang dài cuộn bằng cùng các phím đó. Khi đang gõ một từ, ghi chú hoặc bộ lọc, `l` là một chữ cái và `Enter` xác nhận.
 
 ![Esc ẩn ứng dụng và hiện shell; nhấn Esc lần nữa để quay lại](../images/boss-key.webp)
 
@@ -62,7 +62,7 @@ Trong terminal, `stealthlingo`, `study` và `review` sẽ mở giao diện toàn
 - **Danh sách từ**: `/` để lọc theo chữ, `s` lần lượt chọn trạng thái, `p` lần lượt chọn từ loại, `u` chỉ hiện các từ đến hạn. `Enter` hoặc `l` mở mục từ đã lưu (dùng được khi ngoại tuyến), `a` phát âm, `n` sửa ghi chú, `d` rồi `y` hoặc `l` để xóa từ (lưu lại từ đó sẽ khôi phục tiến độ). `PgUp`/`PgDn` và `g`/`G` giúp di chuyển nhanh trong danh sách dài. Các từ do tác tử AI thêm được đánh dấu `agent`, và khi chọn, phần chi tiết bên dưới hiển thị lý do mà tác tử đưa ra.
 - **Thiết lập** (`c`): `←`/`→` thay đổi giá trị đang chọn, `PgUp`/`PgDn` mỗi lần 10, `Enter` hoặc `l` để gõ số và xác nhận, `r` khôi phục giá trị mặc định, `R` rồi `y` hoặc `l` khôi phục mọi thiết lập. Mỗi thay đổi được lưu ngay; giá trị nằm ngoài phạm vi cho phép sẽ không được lưu.
 - **Tra từ**: gõ một từ rồi nhấn `Enter`; sau đó `s` để lưu hoặc xóa từ, `a` để phát âm, `Tab` chuyển giữa mục từ rút gọn và đầy đủ, `/` để tra từ mới, `q` để quay lại.
-- `Ctrl+C` kết thúc phiên đang học, hủy bộ lọc hoặc ghi chú đang sửa, còn trong các trường hợp khác thì thoát chương trình. Mỗi câu trả lời được lưu ngay khi bạn trả lời.
+- `Ctrl+C` kết thúc phiên đang học, hủy bộ lọc hoặc ghi chú đang sửa, còn trong các trường hợp khác thì thoát chương trình. Đây là cách duy nhất để thoát, nên lỡ nhấn thêm `q` cũng không đóng ứng dụng. Mỗi câu trả lời được lưu ngay khi bạn trả lời.
 - Giao diện cần terminal tối thiểu 40×12 ký tự. Khi cửa sổ thấp, các khung sẽ thu nhỏ, phần tóm tắt ở màn hình chính gói gọn trong một dòng và menu chia thành hai cột (cửa sổ rộng) hoặc có thể cuộn, để mục đang chọn và ô nhập đáp án luôn hiển thị.
 
 ![Thẻ ghi nhớ đã hiện nghĩa, đang chờ tự chấm](../images/flashcard.png)

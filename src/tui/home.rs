@@ -24,10 +24,10 @@ enum Item {
     Words,
     Stats,
     Settings,
-    Quit,
 }
 
-const MENU: [(char, &str, Item); 12] = [
+/// Quitting is Ctrl+C only, so a stray key can never close the app.
+const MENU: [(char, &str, Item); 11] = [
     ('r', "Review due words", Item::Review),
     ('s', "Study · flashcards", Item::Study(StudyMode::Memory)),
     ('p', "Spelling practice", Item::Study(StudyMode::Spelling)),
@@ -39,7 +39,6 @@ const MENU: [(char, &str, Item); 12] = [
     ('w', "Word list", Item::Words),
     ('t', "Stats", Item::Stats),
     ('c', "Settings", Item::Settings),
-    ('q', "Quit", Item::Quit),
 ];
 
 /// Body width from which a menu that does not fit is split into two columns.
@@ -109,7 +108,6 @@ impl Home {
             Item::Words => fx.go(Target::Words),
             Item::Stats => fx.go(Target::Stats),
             Item::Settings => fx.go(Target::Settings),
-            Item::Quit => fx.quit(),
         }
     }
 
@@ -237,7 +235,7 @@ impl View for Home {
     }
 
     fn hints(&self) -> Vec<(&'static str, &'static str)> {
-        vec![("↑↓", "move"), ("Enter/l", "open"), ("q", "quit")]
+        vec![("↑↓", "move"), ("Enter/l", "open"), ("^C", "quit")]
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {

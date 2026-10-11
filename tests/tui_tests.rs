@@ -105,7 +105,14 @@ fn home_explains_an_empty_word_list() {
     // Starting practice with nothing saved stays on the home screen.
     press(&mut app, &mut ctx, KeyCode::Char('s'));
     assert!(app.flash_text().unwrap().contains("word list is empty"));
+    // Only Ctrl+C quits, so extra presses of `q` never close the app.
     press(&mut app, &mut ctx, KeyCode::Char('q'));
+    press(&mut app, &mut ctx, KeyCode::Char('q'));
+    assert!(!app.should_quit());
+    app.handle_key(
+        &mut ctx,
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    );
     assert!(app.should_quit());
 }
 
@@ -136,7 +143,8 @@ fn short_terminals_show_the_whole_home_menu() {
     let home = screen_sized(&mut app, 100, 13);
     assert!(home.contains("Answered 0"), "{home}");
     assert!(home.contains("r  Review due words"), "{home}");
-    assert!(home.contains("q  Quit"), "{home}");
+    assert!(home.contains("c  Settings"), "{home}");
+    assert!(!home.contains("Quit"), "{home}");
 }
 
 #[test]
@@ -147,14 +155,14 @@ fn home_menu_scrolls_to_the_highlighted_item() {
     // Too narrow for two columns.
     let home = screen_sized(&mut app, 60, 12);
     assert!(home.contains("Your word list is empty"), "{home}");
-    assert!(!home.contains("Quit"), "{home}");
+    assert!(!home.contains("Settings"), "{home}");
 
     press(&mut app, &mut ctx, KeyCode::Up);
     press(&mut app, &mut ctx, KeyCode::Up);
     let home = screen_sized(&mut app, 60, 12);
-    assert!(home.contains("› q  Quit"), "{home}");
+    assert!(home.contains("› c  Settings"), "{home}");
     let small = screen_sized(&mut app, 40, 12);
-    assert!(small.contains("› q  Quit"), "{small}");
+    assert!(small.contains("› c  Settings"), "{small}");
 }
 
 #[test]

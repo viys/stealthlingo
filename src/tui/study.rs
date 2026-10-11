@@ -554,7 +554,7 @@ impl View for Study {
 
     fn hints(&self) -> Vec<(&'static str, &'static str)> {
         let Stage::Card(card) = &self.stage else {
-            return vec![("Enter/l", "home"), ("r", "another round"), ("q", "quit")];
+            return vec![("Enter/l", "home"), ("r", "another round"), ("^C", "quit")];
         };
         let audio = card
             .voice
@@ -630,9 +630,9 @@ impl View for Study {
             | KeyCode::Char(' ')
             | KeyCode::Char('h')
             | KeyCode::Char('l')
-            | KeyCode::Char('L') => fx.go(Target::Home),
+            | KeyCode::Char('L')
+            | KeyCode::Char('q') => fx.go(Target::Home),
             KeyCode::Char('r') => fx.go(Target::Session(self.request)),
-            KeyCode::Char('q') => fx.quit(),
             _ => {}
         }
         Ok(())

@@ -51,7 +51,7 @@ stealthlingo                              # abre la aplicación a pantalla compl
 
 ## Interfaz a pantalla completa
 
-En una terminal, `stealthlingo`, `study` y `review` abren una interfaz a pantalla completa. La pantalla de inicio muestra lo que toca repasar hoy, tu avance hacia el objetivo diario y un menú (`r` repasar, `s` tarjetas, `p` ortografía, `m` letras que faltan, `i` escucha, `x` práctica mixta, `e` repetir errores, `/` buscar, `w` lista de palabras, `t` estadísticas, `c` ajustes, `q` salir); `↑`/`↓` (o `k`/`j`) mueven y `Enter` o `l` confirman. Las listas y las páginas largas se desplazan con las mismas teclas. Al escribir una palabra, una nota o un filtro, `l` es una letra y `Enter` confirma.
+En una terminal, `stealthlingo`, `study` y `review` abren una interfaz a pantalla completa. La pantalla de inicio muestra lo que toca repasar hoy, tu avance hacia el objetivo diario y un menú (`r` repasar, `s` tarjetas, `p` ortografía, `m` letras que faltan, `i` escucha, `x` práctica mixta, `e` repetir errores, `/` buscar, `w` lista de palabras, `t` estadísticas, `c` ajustes); `↑`/`↓` (o `k`/`j`) mueven y `Enter` o `l` confirman. Las listas y las páginas largas se desplazan con las mismas teclas. Al escribir una palabra, una nota o un filtro, `l` es una letra y `Enter` confirma.
 
 ![Esc oculta la aplicación y muestra la terminal; otro Esc la recupera](../images/boss-key.webp)
 
@@ -62,7 +62,7 @@ En una terminal, `stealthlingo`, `study` y `review` abren una interfaz a pantall
 - **Lista de palabras**: `/` filtra por texto, `s` recorre los estados, `p` las categorías gramaticales y `u` muestra solo las palabras pendientes. `Enter` o `l` abre la entrada guardada (sin conexión), `a` la reproduce, `n` edita la nota y `d` seguido de `y` o `l` elimina la palabra (si la vuelves a guardar, recupera su progreso). `PgUp`/`PgDn` y `g`/`G` permiten moverse por listas largas. Las palabras que añadió un agente de IA llevan la marca `agent`, y al seleccionarlas los detalles de abajo muestran el motivo que dio el agente.
 - **Ajustes** (`c`): `←`/`→` cambian el valor seleccionado, `PgUp`/`PgDn` de 10 en 10, `Enter` o `l` permite escribir un número y confirmarlo, `r` restaura el valor predeterminado y `R` seguido de `y` o `l` restaura todos los ajustes. Cada cambio se guarda al instante; los valores fuera del rango permitido no se guardan.
 - **Buscar**: escribe una palabra y pulsa `Enter`; después, `s` la guarda o la elimina, `a` la reproduce, `Tab` alterna entre la entrada breve y la completa, `/` inicia una nueva búsqueda y `q` vuelve atrás.
-- `Ctrl+C` termina la sesión en curso, cancela un filtro o una nota y, en los demás casos, cierra la aplicación. Cada respuesta se guarda en cuanto la das.
+- `Ctrl+C` termina la sesión en curso, cancela un filtro o una nota y, en los demás casos, cierra la aplicación. Es la única forma de salir, así que pulsar `q` de más nunca la cierra. Cada respuesta se guarda en cuanto la das.
 - La interfaz necesita una terminal de al menos 40×12 caracteres. En ventanas bajas, los recuadros se reducen, el resumen de inicio cabe en una línea y el menú se divide en dos columnas (ventanas anchas) o se desplaza, para que el elemento seleccionado y el campo de respuesta sigan visibles.
 
 ![Una tarjeta con el significado a la vista, esperando la calificación](../images/flashcard.png)

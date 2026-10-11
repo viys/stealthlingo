@@ -51,7 +51,7 @@ stealthlingo                              # abre o app em tela cheia: praticar, 
 
 ## Interface em tela cheia
 
-Em um terminal, `stealthlingo`, `study` e `review` abrem uma interface em tela cheia. A tela inicial mostra o que está pendente hoje, o seu progresso na meta diária e um menu (`r` revisar, `s` flashcards, `p` ortografia, `m` letras faltando, `i` audição, `x` prática mista, `e` refazer erros, `/` pesquisar, `w` lista de palavras, `t` estatísticas, `c` configurações, `q` sair); `↑`/`↓` (ou `k`/`j`) movem e `Enter` ou `l` confirmam. Listas e páginas longas rolam com as mesmas teclas. Ao digitar uma palavra, uma nota ou um filtro, `l` é uma letra e `Enter` confirma.
+Em um terminal, `stealthlingo`, `study` e `review` abrem uma interface em tela cheia. A tela inicial mostra o que está pendente hoje, o seu progresso na meta diária e um menu (`r` revisar, `s` flashcards, `p` ortografia, `m` letras faltando, `i` audição, `x` prática mista, `e` refazer erros, `/` pesquisar, `w` lista de palavras, `t` estatísticas, `c` configurações); `↑`/`↓` (ou `k`/`j`) movem e `Enter` ou `l` confirmam. Listas e páginas longas rolam com as mesmas teclas. Ao digitar uma palavra, uma nota ou um filtro, `l` é uma letra e `Enter` confirma.
 
 ![Esc esconde o app e mostra o terminal; outro Esc traz o app de volta](../images/boss-key.webp)
 
@@ -62,7 +62,7 @@ Em um terminal, `stealthlingo`, `study` e `review` abrem uma interface em tela c
 - **Lista de palavras**: `/` filtra por texto, `s` alterna entre os status, `p` entre as classes gramaticais e `u` mostra só as palavras pendentes. `Enter` ou `l` abre a entrada salva (offline), `a` toca a palavra, `n` edita a nota e `d` seguido de `y` ou `l` remove a palavra (salvá-la de novo restaura o progresso). `PgUp`/`PgDn` e `g`/`G` navegam por listas longas. As palavras adicionadas por um agente de IA aparecem marcadas com `agent`, e ao selecioná-las os detalhes abaixo mostram o motivo dado pelo agente.
 - **Configurações** (`c`): `←`/`→` alteram o valor selecionado, `PgUp`/`PgDn` de 10 em 10, `Enter` ou `l` permite digitar um número e confirmá-lo, `r` restaura o padrão e `R` seguido de `y` ou `l` restaura todas as configurações. Cada alteração é salva na hora; valores fora do intervalo permitido não são salvos.
 - **Pesquisar**: digite uma palavra e pressione `Enter`; depois, `s` salva ou remove a palavra, `a` toca a palavra, `Tab` alterna entre a entrada resumida e a completa, `/` inicia uma nova pesquisa e `q` volta.
-- `Ctrl+C` encerra a sessão atual, cancela um filtro ou uma nota e, nos outros casos, fecha o programa. Cada resposta é salva assim que é dada.
+- `Ctrl+C` encerra a sessão atual, cancela um filtro ou uma nota e, nos outros casos, fecha o programa. É a única forma de sair, então apertar `q` a mais nunca fecha o app. Cada resposta é salva assim que é dada.
 - A interface precisa de um terminal com pelo menos 40×12 caracteres. Em janelas baixas, os quadros encolhem, o resumo da tela inicial cabe em uma linha e o menu se divide em duas colunas (janelas largas) ou rola, para que o item selecionado e o campo de resposta continuem visíveis.
 
 ![Um flashcard com o significado revelado, aguardando a avaliação](../images/flashcard.png)
