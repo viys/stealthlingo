@@ -8,6 +8,16 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use reqwest::blocking::Client;
+use rodio::Source;
+
+/// How long the output stays open after the last real sample.
+///
+/// `Sink::sleep_until_end` returns when that sample has been copied into the
+/// device callback, which is still one buffer ahead of the speakers. Closing
+/// the stream there throws the buffer away. The buffer is only a few tens of
+/// milliseconds, so a recording with a quiet tail sounds complete and one
+/// that ends on the last consonant does not.
+const OUTPUT_DRAIN: Duration = Duration::from_millis(120);
 
 #[derive(Clone)]
 pub struct AudioPlayer {
@@ -75,14 +85,68 @@ impl AudioPlayer {
 
 /// Plays an audio file and blocks until playback finishes.
 pub fn play_file(path: &Path) -> Result<()> {
+    let source = decode_for_playback(path)?;
+    // The full-screen player calls this on a background thread. cpal would
+    // otherwise initialize COM as a single-threaded apartment, which needs a
+    // message pump that thread never runs; WASAPI then sometimes stops the
+    // stream before the clip has been played.
+    ensure_audio_com();
     let (_stream, handle) =
         rodio::OutputStream::try_default().context("no audio output device is available")?;
     let sink = rodio::Sink::try_new(&handle).context("could not open the audio output")?;
-    let file = File::open(path).with_context(|| format!("could not open {}", path.display()))?;
-    let source = rodio::Decoder::new(BufReader::new(file))?;
     sink.append(source);
     sink.sleep_until_end();
     Ok(())
+}
+
+/// Decodes the whole clip, then appends silence.
+///
+/// Pronunciations are short, so decoding up front keeps that work off the
+/// audio callback. The silence is what holds the device open long enough to
+/// play the real samples already sitting in its buffer; closing earlier cuts
+/// them off.
+fn decode_for_playback(path: &Path) -> Result<rodio::buffer::SamplesBuffer<i16>> {
+    let file = File::open(path).with_context(|| format!("could not open {}", path.display()))?;
+    let decoder = rodio::Decoder::new(BufReader::new(file))?;
+    let channels = decoder.channels();
+    let sample_rate = decoder.sample_rate();
+    if channels == 0 || sample_rate == 0 {
+        bail!("the pronunciation file has no playable audio");
+    }
+    let mut samples: Vec<i16> = decoder.collect();
+    if samples.is_empty() {
+        bail!("the pronunciation file is empty");
+    }
+    let drain = output_drain_samples(channels, sample_rate);
+    samples.extend(std::iter::repeat_n(0, drain));
+    Ok(rodio::buffer::SamplesBuffer::new(
+        channels,
+        sample_rate,
+        samples,
+    ))
+}
+
+fn output_drain_samples(channels: u16, sample_rate: u32) -> usize {
+    let frames = u64::from(sample_rate) * (OUTPUT_DRAIN.as_millis() as u64) / 1000;
+    frames as usize * usize::from(channels)
+}
+
+/// Makes COM safe to use from a thread that does not pump window messages.
+fn ensure_audio_com() {
+    #[cfg(windows)]
+    {
+        thread_local! {
+            static STARTED: () = unsafe {
+                #[link(name = "ole32")]
+                extern "system" {
+                    fn CoInitializeEx(reserved: *mut core::ffi::c_void, coinit: u32) -> i32;
+                }
+                // COINIT_MULTITHREADED.
+                let _hr = CoInitializeEx(core::ptr::null_mut(), 0);
+            };
+        }
+        STARTED.with(|_| {});
+    }
 }
 
 /// 64-bit FNV-1a. Used instead of `DefaultHasher`, whose output may change
@@ -123,7 +187,56 @@ pub fn cache_file_name(headword: &str, url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::cache_file_name;
+    use std::io::Write;
+
+    use super::{cache_file_name, decode_for_playback, output_drain_samples, OUTPUT_DRAIN};
+    use rodio::Source;
+
+    /// Writes a quiet mono PCM WAV.
+    fn write_pcm_wav(path: &std::path::Path, sample_rate: u32, samples: &[i16]) {
+        let data_len = (samples.len() * 2) as u32;
+        let mut file = std::fs::File::create(path).unwrap();
+        file.write_all(b"RIFF").unwrap();
+        file.write_all(&(36 + data_len).to_le_bytes()).unwrap();
+        file.write_all(b"WAVEfmt ").unwrap();
+        file.write_all(&16u32.to_le_bytes()).unwrap();
+        file.write_all(&1u16.to_le_bytes()).unwrap();
+        file.write_all(&1u16.to_le_bytes()).unwrap();
+        file.write_all(&sample_rate.to_le_bytes()).unwrap();
+        file.write_all(&(sample_rate * 2).to_le_bytes()).unwrap();
+        file.write_all(&2u16.to_le_bytes()).unwrap();
+        file.write_all(&16u16.to_le_bytes()).unwrap();
+        file.write_all(b"data").unwrap();
+        file.write_all(&data_len.to_le_bytes()).unwrap();
+        for sample in samples {
+            file.write_all(&sample.to_le_bytes()).unwrap();
+        }
+    }
+
+    #[test]
+    fn playback_keeps_the_clip_and_a_device_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tone.wav");
+        let sample_rate = 48_000u32;
+        let clip: Vec<i16> = (0..480)
+            .map(|i| if i % 2 == 0 { 1000 } else { -1000 })
+            .collect();
+        write_pcm_wav(&path, sample_rate, &clip);
+
+        let played = decode_for_playback(&path).unwrap();
+        let drain = output_drain_samples(1, sample_rate);
+        let drain_ms = u128::from(drain as u64) * 1000 / u128::from(sample_rate);
+        assert!(
+            drain_ms + 1 >= OUTPUT_DRAIN.as_millis(),
+            "drain is only {drain_ms} ms"
+        );
+        assert_eq!(played.channels(), 1);
+        assert_eq!(played.sample_rate(), sample_rate);
+        let samples: Vec<i16> = played.collect();
+        assert_eq!(&samples[..clip.len()], clip.as_slice());
+        assert!(samples[clip.len()..].iter().all(|sample| *sample == 0));
+        assert_eq!(samples.len(), clip.len() + drain);
+    }
 
     fn parts(name: &str) -> (&str, &str, &str) {
         let (rest, ext) = name.rsplit_once('.').unwrap();
