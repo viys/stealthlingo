@@ -90,7 +90,7 @@ impl Lookup {
     fn entry_lines(&self, cached: &CachedWord, width: usize) -> Vec<Line<'static>> {
         let entry = &cached.entry;
         let full = self.detail == Detail::Full;
-        let mut lines = vec![headline(entry)];
+        let mut lines = vec![headline(entry), Line::raw("")];
         lines.push(if cached.in_collection {
             Line::styled("✓ in your word list", theme::good())
         } else {

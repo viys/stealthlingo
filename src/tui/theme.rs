@@ -50,6 +50,19 @@ pub fn heading() -> Style {
     accent().add_modifier(Modifier::BOLD)
 }
 
+/// The headword: the only text on screen with a background, so it is the
+/// first thing the eye lands on.
+pub fn word() -> Style {
+    if colors() {
+        Style::new()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+    }
+}
+
 pub fn label() -> Style {
     accent().add_modifier(Modifier::ITALIC)
 }

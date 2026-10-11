@@ -1,6 +1,7 @@
 use chrono::Utc;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::style::{Color, Modifier};
 use ratatui::Terminal;
 use stealthlingo::cli::{StudyArgs, StudyMode};
 use stealthlingo::commands::study::SessionRequest;
@@ -208,6 +209,30 @@ fn flashcards_reveal_and_rate_with_single_keys() {
 
     press(&mut app, &mut ctx, KeyCode::Enter);
     assert!(screen(&mut app).contains("Home"));
+}
+
+#[test]
+fn the_headword_stands_out_from_other_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, session(StudyMode::Memory)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(100, 32)).unwrap();
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let width = buffer.area.width as usize;
+    let cells = buffer.content();
+    let row = cells
+        .chunks(width)
+        .find(|row| {
+            let text: String = row.iter().map(|cell| cell.symbol()).collect();
+            text.contains(" ephemeral ")
+        })
+        .expect("the headline is on screen");
+    let first = row.iter().position(|cell| cell.symbol() == "e").unwrap();
+    let style = row[first].style();
+    let marked = style.bg.is_some_and(|bg| bg != Color::Reset)
+        || style.add_modifier.contains(Modifier::REVERSED);
+    assert!(marked, "{style:?}");
 }
 
 #[test]

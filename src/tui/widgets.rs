@@ -204,9 +204,9 @@ pub fn labelled(
         .collect()
 }
 
-/// `ephemeral   UK /ɪˈfɛm(ə)ɹəl/ · US /…/  ♪`
+/// `▌ephemeral▐   UK /ɪˈfɛm(ə)ɹəl/ · US /…/  ♪`, the word on a colored block.
 pub fn headline(entry: &Entry) -> Line<'static> {
-    let mut spans = vec![Span::styled(entry.word.clone(), theme::heading())];
+    let mut spans = vec![Span::styled(format!(" {} ", entry.word), theme::word())];
     let pronunciation = pronunciation_line(entry, false).or_else(|| entry.phonetic.clone());
     if let Some(p) = pronunciation {
         spans.push(Span::raw("   "));
