@@ -67,34 +67,36 @@ stealthlingo                           # open the full-screen app: practice, loo
 In a terminal, `stealthlingo`, `study` and `review` open a full-screen interface.
 The home screen shows what is due today, your progress toward the daily goal and
 a menu (`r` review, `s` flashcards, `p` spelling, `m` missing letters,
-`l` listening, `x` mixed, `e` retry mistakes, `/` look up, `w` word list,
-`t` stats, `c` settings, `q` quit); `↑`/`↓` (or `k`/`j`) and `Enter` work too.
-Lists and long pages scroll with the same keys.
+`i` listening, `x` mixed, `e` retry mistakes, `/` look up, `w` word list,
+`t` stats, `c` settings, `q` quit); `↑`/`↓` (or `k`/`j`) move, and `Enter`
+or `l` confirms. Lists and long pages scroll with the same keys. While typing
+a word, a note, or a filter, `l` is a letter and `Enter` confirms.
 
 ![Esc hides the app and shows the shell; Esc again brings it back](docs/images/boss-key.webp)
 
 - **Esc hides everything instantly** and shows the shell you started from; press
   Esc again to come back. The session clock pauses while hidden.
-- **Flashcards** need no Enter: `Space` reveals, `1`–`4` rate, `a` plays the word,
+- **Flashcards** need no Enter: `Space` or `l` reveals, `1`–`4` rate, `a` plays the word,
   `s` skips, `q` ends the session.
 - **Accents**: `a` plays your default accent (the `accent` setting) first; pressing
   it again on the same word plays the other recorded accent, and so on. The footer
   shows which accent comes next, the header which one is playing.
-- **Spelling and listening**: type the word and press `Enter`. `Tab` shows the
-  answer, `Ctrl+N` skips. In listening practice `Enter` on an empty line replays
+- **Spelling and listening**: type the word and press `Enter`. On the result,
+  `Enter` or `l` continues. `Tab` shows the answer, `Ctrl+N` skips. In listening
+  practice `Enter` on an empty line replays
   the recording and `Ctrl+R` plays the other accent. A wrong answer shows which
   letters were extra or missing. Missing-letter questions show the word with
   some letters blanked out (`e _ h e _ e r _ l`); type the whole word.
 - **Word list**: `/` filters by text, `s` cycles through statuses, `p` through
-  parts of speech, and `u` shows only words that are due. `Enter` opens the
-  saved entry (offline), `a` plays it, `n` edits the note, `d` then `y` removes
+  parts of speech, and `u` shows only words that are due. `Enter` or `l` opens the
+  saved entry (offline), `a` plays it, `n` edits the note, `d` then `y` or `l` removes
   the word (saving it again restores its progress). `PgUp`/`PgDn` and `g`/`G`
   jump through long lists. Words an AI agent added are marked `agent`, and
   the details under the selected word show the agent's reason.
 - **Settings** (`c`): `←`/`→` change the selected value, `PgUp`/`PgDn` by 10,
-  `Enter` types a number, `r` restores the default and `R` restores every
-  setting. Each change is saved immediately; values outside the allowed range
-  are not saved.
+  `Enter` or `l` types a number and confirms it, `r` restores the default, and
+  `R` then `y` or `l` restores every setting. Each change is saved immediately;
+  values outside the allowed range are not saved.
 - **Look up**: type a word and press `Enter`; then `s` saves or removes it, `a`
   plays it, `Tab` switches between the brief and the full entry, `/` starts a
   new lookup and `q` goes back.

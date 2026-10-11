@@ -164,7 +164,9 @@ impl Study {
         let mode = card.mode;
         match &mut card.phase {
             Phase::Front => match key.code {
-                KeyCode::Char(' ') | KeyCode::Enter => card.phase = Phase::Back,
+                KeyCode::Char(' ') | KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('L') => {
+                    card.phase = Phase::Back
+                }
                 KeyCode::Char('a') => card.voice.play(&card.item.entry, &accent, fx),
                 KeyCode::Char('s') => {
                     self.session.skip();
@@ -221,7 +223,9 @@ impl Study {
                 }
             }
             Phase::Feedback { .. } => match key.code {
-                KeyCode::Enter | KeyCode::Char(' ') => self.advance(ctx, fx),
+                KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Char('l') | KeyCode::Char('L') => {
+                    self.advance(ctx, fx)
+                }
                 KeyCode::Char('a') => card.voice.play(&card.item.entry, &accent, fx),
                 KeyCode::Char('q') => self.end(ctx),
                 _ => {}
@@ -550,14 +554,14 @@ impl View for Study {
 
     fn hints(&self) -> Vec<(&'static str, &'static str)> {
         let Stage::Card(card) = &self.stage else {
-            return vec![("Enter", "home"), ("r", "another round"), ("q", "quit")];
+            return vec![("Enter/l", "home"), ("r", "another round"), ("q", "quit")];
         };
         let audio = card
             .voice
             .hint(&card.item.entry, &self.session.plan().accent);
         match &card.phase {
             Phase::Front => vec![
-                ("Space", "reveal"),
+                ("Space/l", "reveal"),
                 ("a", audio),
                 ("s", "skip"),
                 ("q", "end"),
@@ -583,7 +587,7 @@ impl View for Study {
                 ("^N", "skip"),
                 ("^C", "end"),
             ],
-            Phase::Feedback { .. } => vec![("Enter", "next"), ("a", audio), ("q", "end")],
+            Phase::Feedback { .. } => vec![("Enter/l", "next"), ("a", audio), ("q", "end")],
         }
     }
 
@@ -622,7 +626,11 @@ impl View for Study {
             return self.card_key(ctx, key, fx);
         }
         match key.code {
-            KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Char('h') => fx.go(Target::Home),
+            KeyCode::Enter
+            | KeyCode::Char(' ')
+            | KeyCode::Char('h')
+            | KeyCode::Char('l')
+            | KeyCode::Char('L') => fx.go(Target::Home),
             KeyCode::Char('r') => fx.go(Target::Session(self.request)),
             KeyCode::Char('q') => fx.quit(),
             _ => {}

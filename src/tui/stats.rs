@@ -174,7 +174,11 @@ impl View for Stats {
             KeyCode::Down | KeyCode::Char('j') => {
                 self.scroll = (self.scroll + 1).min(self.max_scroll);
             }
-            KeyCode::Char('q') | KeyCode::Enter | KeyCode::Backspace => fx.go(Target::Home),
+            KeyCode::Char('q')
+            | KeyCode::Enter
+            | KeyCode::Backspace
+            | KeyCode::Char('l')
+            | KeyCode::Char('L') => fx.go(Target::Home),
             _ => {}
         }
         Ok(())

@@ -115,13 +115,13 @@ fn menu_keys_keep_the_highlight_when_nothing_can_start() {
     let mut app = App::new(&mut ctx, Start::Home).unwrap();
 
     // The saved word has no recording, so listening practice cannot start.
-    press(&mut app, &mut ctx, KeyCode::Char('L'));
+    press(&mut app, &mut ctx, KeyCode::Char('I'));
     assert!(app.flash_text().unwrap().contains("listening practice"));
     let home = screen(&mut app);
-    assert!(home.contains("› l  Listening practice"), "{home}");
+    assert!(home.contains("› i  Listening practice"), "{home}");
 
-    // Enter retries listening instead of opening another mode.
-    press(&mut app, &mut ctx, KeyCode::Enter);
+    // `l` confirms the highlighted item, so it retries listening.
+    press(&mut app, &mut ctx, KeyCode::Char('l'));
     let home = screen(&mut app);
     assert!(home.contains("Home"), "{home}");
     assert!(app.flash_text().unwrap().contains("listening practice"));
@@ -189,7 +189,7 @@ fn flashcards_reveal_and_rate_with_single_keys() {
     let mut app = App::new(&mut ctx, session(StudyMode::Memory)).unwrap();
     let front = screen(&mut app);
     assert!(front.contains("ephemeral"), "{front}");
-    assert!(front.contains("Space reveal"), "{front}");
+    assert!(front.contains("Space/l reveal"), "{front}");
     assert!(
         !front.contains("Lasting"),
         "the meaning must stay hidden: {front}"
@@ -211,6 +211,17 @@ fn flashcards_reveal_and_rate_with_single_keys() {
 }
 
 #[test]
+fn l_reveals_a_flashcard() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, session(StudyMode::Memory)).unwrap();
+    press(&mut app, &mut ctx, KeyCode::Char('L'));
+    let back = screen(&mut app);
+    assert!(back.contains("Lasting"), "{back}");
+    assert!(back.contains("1 again"), "{back}");
+}
+
+#[test]
 fn missed_spellings_show_the_difference_and_come_back() {
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = context(&dir, true);
@@ -229,7 +240,7 @@ fn missed_spellings_show_the_difference_and_come_back() {
     assert!(feedback.contains("you typed  ephemral"), "{feedback}");
 
     // The missed word is asked again at the end of the session.
-    press(&mut app, &mut ctx, KeyCode::Enter);
+    press(&mut app, &mut ctx, KeyCode::Char('l'));
     type_text(&mut app, &mut ctx, "Ephemeral");
     press(&mut app, &mut ctx, KeyCode::Enter);
     assert!(screen(&mut app).contains("Correct"));
@@ -397,7 +408,7 @@ fn mixed_practice_starts_new_words_as_flashcards() {
     let mut app = App::new(&mut ctx, session(StudyMode::Mixed)).unwrap();
     let card = screen(&mut app);
     assert!(card.contains("Mixed · Memory"), "{card}");
-    assert!(card.contains("Space reveal"), "{card}");
+    assert!(card.contains("Space/l reveal"), "{card}");
     press(&mut app, &mut ctx, KeyCode::Char(' '));
     press(&mut app, &mut ctx, KeyCode::Char('1'));
     // The missed word comes back, now asked another way.
@@ -505,10 +516,10 @@ fn typed_settings_outside_the_range_are_not_saved() {
     press(&mut app, &mut ctx, KeyCode::Down);
     assert!(screen(&mut app).contains("› New words per day"));
     press(&mut app, &mut ctx, KeyCode::Up);
-    press(&mut app, &mut ctx, KeyCode::Enter);
+    press(&mut app, &mut ctx, KeyCode::Char('l'));
     type_text(&mut app, &mut ctx, "3");
     assert!(screen(&mut app).contains("› 3"));
-    press(&mut app, &mut ctx, KeyCode::Enter);
+    press(&mut app, &mut ctx, KeyCode::Char('l'));
     assert_eq!(saved_config(&ctx)["daily_goal"], 3);
 
     // The goal is more than one saved word allows today.
@@ -540,7 +551,7 @@ fn settings_reset_one_or_all_values() {
     press(&mut app, &mut ctx, KeyCode::Char('n'));
     assert_eq!(ctx.config.daily_goal, 11);
     press(&mut app, &mut ctx, KeyCode::Char('R'));
-    press(&mut app, &mut ctx, KeyCode::Char('y'));
+    press(&mut app, &mut ctx, KeyCode::Char('l'));
     assert_eq!(saved_config(&ctx)["daily_goal"], 10);
 }
 

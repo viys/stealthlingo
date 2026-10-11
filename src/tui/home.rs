@@ -32,7 +32,7 @@ const MENU: [(char, &str, Item); 12] = [
     ('s', "Study · flashcards", Item::Study(StudyMode::Memory)),
     ('p', "Spelling practice", Item::Study(StudyMode::Spelling)),
     ('m', "Missing letters", Item::Study(StudyMode::Letters)),
-    ('l', "Listening practice", Item::Study(StudyMode::Listening)),
+    ('i', "Listening practice", Item::Study(StudyMode::Listening)),
     ('x', "Mixed practice", Item::Study(StudyMode::Mixed)),
     ('e', "Retry mistakes", Item::Mistakes),
     ('/', "Look up a word", Item::Lookup),
@@ -237,7 +237,7 @@ impl View for Home {
     }
 
     fn hints(&self) -> Vec<(&'static str, &'static str)> {
-        vec![("↑↓", "move"), ("Enter", "open"), ("q", "quit")]
+        vec![("↑↓", "move"), ("Enter/l", "open"), ("q", "quit")]
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -327,7 +327,10 @@ impl View for Home {
             KeyCode::Enter | KeyCode::Char(' ') => self.activate(MENU[self.selected].2, fx),
             KeyCode::Char(c) => {
                 let c = c.to_ascii_lowercase();
-                if let Some(i) = MENU.iter().position(|(k, _, _)| *k == c) {
+                // `l` confirms the highlighted item. Listening practice is `i`.
+                if c == 'l' {
+                    self.activate(MENU[self.selected].2, fx);
+                } else if let Some(i) = MENU.iter().position(|(k, _, _)| *k == c) {
                     self.selected = i;
                     self.activate(MENU[i].2, fx);
                 }

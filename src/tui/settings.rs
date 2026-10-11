@@ -133,7 +133,7 @@ impl Settings {
             KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => self.step(ctx, fx, 1),
             KeyCode::PageUp => self.step(ctx, fx, 10),
             KeyCode::PageDown => self.step(ctx, fx, -10),
-            KeyCode::Enter => match setting.kind {
+            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('L') => match setting.kind {
                 Kind::Number { .. } => self.mode = Mode::Typing(LineInput::default()),
                 Kind::Accent => self.step(ctx, fx, 1),
             },
@@ -149,7 +149,7 @@ impl Settings {
             return;
         };
         match key.code {
-            KeyCode::Enter => {
+            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('L') => {
                 let text = input.text().to_string();
                 if text.is_empty() {
                     self.mode = Mode::Browse;
@@ -240,11 +240,11 @@ impl Settings {
         match &self.mode {
             Mode::ConfirmResetAll => lines.push(Line::from(vec![
                 Span::styled("Reset every setting? ", theme::bad()),
-                Span::styled("y", theme::heading()),
+                Span::styled("y/l", theme::heading()),
                 Span::styled(" yes   any other key: no", theme::dim()),
             ])),
             Mode::Typing(_) => lines.extend(wrapped(
-                &format!("Type a number ({}), then Enter.", setting.range()),
+                &format!("Type a number ({}), then Enter or l.", setting.range()),
                 theme::dim(),
             )),
             Mode::Browse => lines.extend(wrapped(
@@ -287,13 +287,13 @@ impl View for Settings {
                 ("↑↓", "select"),
                 ("←→", "adjust"),
                 ("PgUp/PgDn", "±10"),
-                ("Enter", "type"),
+                ("Enter/l", "type"),
                 ("r", "reset"),
                 ("R", "reset all"),
                 ("q", "back"),
             ],
-            Mode::Typing(_) => vec![("Enter", "save"), ("↑↓", "cancel")],
-            Mode::ConfirmResetAll => vec![("y", "reset all"), ("any key", "cancel")],
+            Mode::Typing(_) => vec![("Enter/l", "save"), ("↑↓", "cancel")],
+            Mode::ConfirmResetAll => vec![("y/l", "reset all"), ("any key", "cancel")],
         }
     }
 
@@ -350,7 +350,10 @@ impl View for Settings {
             Mode::Typing(_) => self.typing_key(ctx, key, fx),
             Mode::ConfirmResetAll => {
                 self.mode = Mode::Browse;
-                if key.code == KeyCode::Char('y') {
+                if matches!(
+                    key.code,
+                    KeyCode::Char('y') | KeyCode::Char('l') | KeyCode::Char('L')
+                ) {
                     self.change(ctx, fx, |config| *config = Config::default());
                 }
             }

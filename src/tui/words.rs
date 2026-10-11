@@ -206,7 +206,7 @@ impl Words {
                 self.conditions.due = !self.conditions.due;
                 self.change_conditions(ctx, fx)?;
             }
-            KeyCode::Enter => {
+            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('L') => {
                 if let Some(cached) = &self.selected {
                     fx.go(Target::Entry(Box::new(cached.clone())));
                 }
@@ -250,7 +250,7 @@ impl Words {
             Mode::Note(_) => {}
             Mode::ConfirmRemove => lines.push(Line::from(vec![
                 Span::styled(format!("Remove \"{}\"? ", word.display_word), theme::bad()),
-                Span::styled("y", theme::heading()),
+                Span::styled("y/l", theme::heading()),
                 Span::styled(" yes   any other key: no", theme::dim()),
             ])),
             _ => {
@@ -297,7 +297,7 @@ impl View for Words {
         match self.mode {
             Mode::Browse => vec![
                 ("↑↓", "move"),
-                ("Enter", "details"),
+                ("Enter/l", "details"),
                 ("/", "filter"),
                 (
                     "a",
@@ -312,7 +312,7 @@ impl View for Words {
             ],
             Mode::Filter => vec![("Enter", "done"), ("↑↓", "move"), ("^C", "clear")],
             Mode::Note(_) => vec![("Enter", "save note"), ("^C", "cancel")],
-            Mode::ConfirmRemove => vec![("y", "remove"), ("any key", "cancel")],
+            Mode::ConfirmRemove => vec![("y/l", "remove"), ("any key", "cancel")],
         }
     }
 
@@ -510,7 +510,10 @@ impl View for Words {
             }
             Mode::ConfirmRemove => {
                 self.mode = Mode::Browse;
-                if key.code == KeyCode::Char('y') {
+                if matches!(
+                    key.code,
+                    KeyCode::Char('y') | KeyCode::Char('l') | KeyCode::Char('L')
+                ) {
                     if let Some(word) = self.current() {
                         let name = word.display_word.clone();
                         ctx.db
