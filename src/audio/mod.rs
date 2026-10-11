@@ -4,20 +4,51 @@
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
+use std::thread;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use reqwest::blocking::Client;
 use rodio::Source;
 
-/// How long the output stays open after the last real sample.
+/// How long an output stays open after a clip's last sample.
 ///
-/// `Sink::sleep_until_end` returns when that sample has been copied into the
-/// device callback, which is still one buffer ahead of the speakers. Closing
-/// the stream there throws the buffer away. The buffer is only a few tens of
-/// milliseconds, so a recording with a quiet tail sounds complete and one
-/// that ends on the last consonant does not.
-const OUTPUT_DRAIN: Duration = Duration::from_millis(120);
+/// `Sink::sleep_until_end` returns once that sample has been handed to the
+/// audio device, not once it has been heard. Bluetooth headsets keep another
+/// 150–300 ms queued past that point, and closing the output discards the
+/// queue, which cuts off the end of the word.
+pub const OUTPUT_TAIL: Duration = Duration::from_millis(500);
+
+type Clip = rodio::buffer::SamplesBuffer<i16>;
+
+/// An open audio output that clips can play on one after another.
+pub struct Output {
+    _stream: rodio::OutputStream,
+    handle: rodio::OutputStreamHandle,
+}
+
+impl Output {
+    pub fn open() -> Result<Self> {
+        // The full-screen player opens this on a background thread. cpal would
+        // otherwise initialize COM as a single-threaded apartment, which needs
+        // a message pump that thread never runs.
+        ensure_audio_com();
+        let (stream, handle) =
+            rodio::OutputStream::try_default().context("no audio output device is available")?;
+        Ok(Self {
+            _stream: stream,
+            handle,
+        })
+    }
+
+    /// Blocks until the clip's last sample has reached the device.
+    fn play(&self, clip: Clip) -> Result<()> {
+        let sink = rodio::Sink::try_new(&self.handle).context("could not open the audio output")?;
+        sink.append(clip);
+        sink.sleep_until_end();
+        Ok(())
+    }
+}
 
 #[derive(Clone)]
 pub struct AudioPlayer {
@@ -70,42 +101,42 @@ impl AudioPlayer {
         Ok(path)
     }
 
+    /// Plays a pronunciation and blocks until it has been heard.
     pub fn play(&self, headword: &str, url: &str) -> Result<()> {
+        let mut output = None;
+        self.play_on(&mut output, headword, url)?;
+        thread::sleep(OUTPUT_TAIL);
+        Ok(())
+    }
+
+    /// Plays a pronunciation on `output`, opening it first if needed, and
+    /// returns once the last sample has reached the device. Keep the output
+    /// open for [`OUTPUT_TAIL`] afterwards so the end is heard.
+    pub fn play_on(&self, output: &mut Option<Output>, headword: &str, url: &str) -> Result<()> {
         let path = self.ensure_cached(headword, url)?;
-        if let Err(err) = play_file(&path) {
-            // A corrupt download should not poison the cache.
-            if err.downcast_ref::<rodio::decoder::DecoderError>().is_some() {
-                let _ = fs::remove_file(&path);
+        let clip = match decode(&path) {
+            Ok(clip) => clip,
+            Err(err) => {
+                // A corrupt download should not poison the cache.
+                if err.downcast_ref::<rodio::decoder::DecoderError>().is_some() {
+                    let _ = fs::remove_file(&path);
+                }
+                return Err(err);
             }
-            return Err(err);
-        }
+        };
+        let open = match output.take() {
+            Some(open) => open,
+            None => Output::open()?,
+        };
+        open.play(clip)?;
+        *output = Some(open);
         Ok(())
     }
 }
 
-/// Plays an audio file and blocks until playback finishes.
-pub fn play_file(path: &Path) -> Result<()> {
-    let source = decode_for_playback(path)?;
-    // The full-screen player calls this on a background thread. cpal would
-    // otherwise initialize COM as a single-threaded apartment, which needs a
-    // message pump that thread never runs; WASAPI then sometimes stops the
-    // stream before the clip has been played.
-    ensure_audio_com();
-    let (_stream, handle) =
-        rodio::OutputStream::try_default().context("no audio output device is available")?;
-    let sink = rodio::Sink::try_new(&handle).context("could not open the audio output")?;
-    sink.append(source);
-    sink.sleep_until_end();
-    Ok(())
-}
-
-/// Decodes the whole clip, then appends silence.
-///
-/// Pronunciations are short, so decoding up front keeps that work off the
-/// audio callback. The silence is what holds the device open long enough to
-/// play the real samples already sitting in its buffer; closing earlier cuts
-/// them off.
-fn decode_for_playback(path: &Path) -> Result<rodio::buffer::SamplesBuffer<i16>> {
+/// Decodes the whole clip up front, which keeps decoding off the audio
+/// callback; pronunciations are only a second or two long.
+fn decode(path: &Path) -> Result<Clip> {
     let file = File::open(path).with_context(|| format!("could not open {}", path.display()))?;
     let decoder = rodio::Decoder::new(BufReader::new(file))?;
     let channels = decoder.channels();
@@ -113,22 +144,11 @@ fn decode_for_playback(path: &Path) -> Result<rodio::buffer::SamplesBuffer<i16>>
     if channels == 0 || sample_rate == 0 {
         bail!("the pronunciation file has no playable audio");
     }
-    let mut samples: Vec<i16> = decoder.collect();
+    let samples: Vec<i16> = decoder.collect();
     if samples.is_empty() {
         bail!("the pronunciation file is empty");
     }
-    let drain = output_drain_samples(channels, sample_rate);
-    samples.extend(std::iter::repeat_n(0, drain));
-    Ok(rodio::buffer::SamplesBuffer::new(
-        channels,
-        sample_rate,
-        samples,
-    ))
-}
-
-fn output_drain_samples(channels: u16, sample_rate: u32) -> usize {
-    let frames = u64::from(sample_rate) * (OUTPUT_DRAIN.as_millis() as u64) / 1000;
-    frames as usize * usize::from(channels)
+    Ok(Clip::new(channels, sample_rate, samples))
 }
 
 /// Makes COM safe to use from a thread that does not pump window messages.
@@ -189,7 +209,7 @@ pub fn cache_file_name(headword: &str, url: &str) -> String {
 mod tests {
     use std::io::Write;
 
-    use super::{cache_file_name, decode_for_playback, output_drain_samples, OUTPUT_DRAIN};
+    use super::{cache_file_name, decode};
     use rodio::Source;
 
     /// Writes a quiet mono PCM WAV.
@@ -214,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn playback_keeps_the_clip_and_a_device_tail() {
+    fn decoding_keeps_every_sample() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("tone.wav");
         let sample_rate = 48_000u32;
@@ -223,19 +243,18 @@ mod tests {
             .collect();
         write_pcm_wav(&path, sample_rate, &clip);
 
-        let played = decode_for_playback(&path).unwrap();
-        let drain = output_drain_samples(1, sample_rate);
-        let drain_ms = u128::from(drain as u64) * 1000 / u128::from(sample_rate);
-        assert!(
-            drain_ms + 1 >= OUTPUT_DRAIN.as_millis(),
-            "drain is only {drain_ms} ms"
-        );
-        assert_eq!(played.channels(), 1);
-        assert_eq!(played.sample_rate(), sample_rate);
-        let samples: Vec<i16> = played.collect();
-        assert_eq!(&samples[..clip.len()], clip.as_slice());
-        assert!(samples[clip.len()..].iter().all(|sample| *sample == 0));
-        assert_eq!(samples.len(), clip.len() + drain);
+        let decoded = decode(&path).unwrap();
+        assert_eq!(decoded.channels(), 1);
+        assert_eq!(decoded.sample_rate(), sample_rate);
+        assert_eq!(decoded.collect::<Vec<i16>>(), clip);
+    }
+
+    #[test]
+    fn empty_recordings_are_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.wav");
+        write_pcm_wav(&path, 48_000, &[]);
+        assert!(decode(&path).is_err());
     }
 
     fn parts(name: &str) -> (&str, &str, &str) {

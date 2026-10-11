@@ -2,10 +2,10 @@
 //! while a recording downloads or plays.
 
 use std::collections::VecDeque;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 
-use crate::audio::AudioPlayer;
+use crate::audio::{AudioPlayer, Output, OUTPUT_TAIL};
 
 /// Recordings playing or waiting: the current one and at most one more, so
 /// pressing the audio key twice compares two accents without piling up.
@@ -23,8 +23,29 @@ impl AudioWorker {
         let (requests, inbox) = channel::<(String, String)>();
         let (outbox, results) = channel();
         thread::spawn(move || {
-            for (headword, url) in inbox {
-                let result = player.play(&headword, &url).map_err(|e| format!("{e:#}"));
+            let mut output: Option<Output> = None;
+            loop {
+                // An open output stays open for OUTPUT_TAIL after a clip, so
+                // its end is heard and a replay starts on the same output.
+                let request = if output.is_some() {
+                    match inbox.recv_timeout(OUTPUT_TAIL) {
+                        Ok(request) => request,
+                        Err(RecvTimeoutError::Timeout) => {
+                            output = None;
+                            continue;
+                        }
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    }
+                } else {
+                    match inbox.recv() {
+                        Ok(request) => request,
+                        Err(_) => break,
+                    }
+                };
+                let (headword, url) = request;
+                let result = player
+                    .play_on(&mut output, &headword, &url)
+                    .map_err(|e| format!("{e:#}"));
                 if outbox.send(result).is_err() {
                     break;
                 }
