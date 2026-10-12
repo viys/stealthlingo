@@ -843,3 +843,157 @@ fn saved_entries_open_offline_from_the_word_list() {
     press(&mut app, &mut ctx, KeyCode::Char('q'));
     assert!(screen(&mut app).contains("Word list"));
 }
+
+fn set_path(app: &mut App, ctx: &mut Context, path: &str) {
+    press(app, ctx, KeyCode::Home);
+    for _ in 0..80 {
+        press(app, ctx, KeyCode::Delete);
+    }
+    type_text(app, ctx, path);
+}
+
+#[test]
+fn settings_export_and_import_json_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("backup.json");
+    let backup_path = backup.to_string_lossy().into_owned();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    press(&mut app, &mut ctx, KeyCode::Char('c'));
+    press(&mut app, &mut ctx, KeyCode::Char('e'));
+    assert!(screen(&mut app).contains("Export"), "{}", screen(&mut app));
+    set_path(&mut app, &mut ctx, &backup_path);
+    press(&mut app, &mut ctx, KeyCode::Enter);
+    assert!(
+        app.flash_text().unwrap().contains("Exported"),
+        "{:?}",
+        app.flash_text()
+    );
+    assert!(backup.is_file());
+
+    press(&mut app, &mut ctx, KeyCode::Char('q'));
+    assert!(screen(&mut app).contains("Settings"));
+
+    let other = tempfile::tempdir().unwrap();
+    let mut empty = context(&other, false);
+    let mut app = App::new(&mut empty, Start::Home).unwrap();
+    press(&mut app, &mut empty, KeyCode::Char('c'));
+    press(&mut app, &mut empty, KeyCode::Char('i'));
+    assert!(screen(&mut app).contains("Import"), "{}", screen(&mut app));
+    set_path(&mut app, &mut empty, &backup_path);
+    press(&mut app, &mut empty, KeyCode::Enter);
+    assert!(screen(&mut app).contains("Merge backup into this library?"));
+    press(&mut app, &mut empty, KeyCode::Char('y'));
+    assert!(
+        app.flash_text().unwrap().contains("Imported"),
+        "{:?}",
+        app.flash_text()
+    );
+    assert_eq!(empty.db.collection_size().unwrap(), 1);
+}
+
+#[test]
+fn settings_export_asks_before_overwriting() {
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("backup.json");
+    std::fs::write(&backup, "keep-me\n").unwrap();
+    let backup_path = backup.to_string_lossy().into_owned();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    press(&mut app, &mut ctx, KeyCode::Char('c'));
+    press(&mut app, &mut ctx, KeyCode::Char('e'));
+    set_path(&mut app, &mut ctx, &backup_path);
+    press(&mut app, &mut ctx, KeyCode::Enter);
+    assert!(screen(&mut app).contains("Overwrite this file?"));
+    press(&mut app, &mut ctx, KeyCode::Char('n'));
+    assert_eq!(std::fs::read_to_string(&backup).unwrap(), "keep-me\n");
+    press(&mut app, &mut ctx, KeyCode::Enter);
+    press(&mut app, &mut ctx, KeyCode::Char('y'));
+    assert!(
+        app.flash_text().unwrap().contains("Exported"),
+        "{:?}",
+        app.flash_text()
+    );
+    let text = std::fs::read_to_string(&backup).unwrap();
+    assert!(text.contains("stealthlingo-backup"), "{text}");
+}
+
+#[test]
+fn settings_import_rejects_unknown_extensions() {
+    let dir = tempfile::tempdir().unwrap();
+    let bad = dir.path().join("words.txt");
+    std::fs::write(&bad, "word\n").unwrap();
+    let bad_path = bad.to_string_lossy().into_owned();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    press(&mut app, &mut ctx, KeyCode::Char('c'));
+    press(&mut app, &mut ctx, KeyCode::Char('i'));
+    set_path(&mut app, &mut ctx, &bad_path);
+    press(&mut app, &mut ctx, KeyCode::Enter);
+    assert!(
+        app.flash_text().unwrap().contains("unsupported file type"),
+        "{:?}",
+        app.flash_text()
+    );
+}
+
+#[test]
+fn settings_import_reports_missing_files_before_confirm() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    press(&mut app, &mut ctx, KeyCode::Char('c'));
+    press(&mut app, &mut ctx, KeyCode::Char('i'));
+    let missing = screen(&mut app);
+    assert!(missing.contains("Import"), "{missing}");
+    assert!(missing.contains("Relative to"), "{missing}");
+    // Empty by default — type a name that is not on disk.
+    type_text(&mut app, &mut ctx, "no-such-backup.json");
+    press(&mut app, &mut ctx, KeyCode::Enter);
+    assert!(
+        app.flash_text().unwrap().contains("File not found"),
+        "{:?}",
+        app.flash_text()
+    );
+    assert!(!screen(&mut app).contains("Merge backup"));
+}
+
+#[test]
+fn settings_export_and_import_csv_word_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let csv_path = dir.path().join("words.csv");
+    let csv = csv_path.to_string_lossy().into_owned();
+    let mut ctx = context(&dir, true);
+    save_words(&ctx, &["alpha"]);
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    press(&mut app, &mut ctx, KeyCode::Char('c'));
+    press(&mut app, &mut ctx, KeyCode::Char('e'));
+    press(&mut app, &mut ctx, KeyCode::Tab);
+    assert!(screen(&mut app).contains("CSV (word list)"));
+    set_path(&mut app, &mut ctx, &csv);
+    press(&mut app, &mut ctx, KeyCode::Enter);
+    assert!(
+        app.flash_text().unwrap().contains("Exported"),
+        "{:?}",
+        app.flash_text()
+    );
+    let text = std::fs::read_to_string(&csv_path).unwrap();
+    assert!(text.starts_with("word,"), "{text}");
+    assert!(text.contains("ephemeral"), "{text}");
+
+    ctx.db.archive_from_collection("alpha", Utc::now()).unwrap();
+    assert_eq!(ctx.db.collection_size().unwrap(), 1);
+
+    press(&mut app, &mut ctx, KeyCode::Char('q'));
+    press(&mut app, &mut ctx, KeyCode::Char('i'));
+    set_path(&mut app, &mut ctx, &csv);
+    press(&mut app, &mut ctx, KeyCode::Enter);
+    assert!(screen(&mut app).contains("May use the network"));
+    press(&mut app, &mut ctx, KeyCode::Char('y'));
+    assert!(
+        app.flash_text().unwrap().contains("Imported"),
+        "{:?}",
+        app.flash_text()
+    );
+    assert_eq!(ctx.db.collection_size().unwrap(), 2);
+}

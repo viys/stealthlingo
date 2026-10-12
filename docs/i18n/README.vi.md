@@ -1,180 +1,89 @@
-# stealthlingo
+# StealthLingo
 
 [English](../../README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [Русский](README.ru.md) | **Tiếng Việt**
 
-Công cụ học ngoại ngữ chạy trong terminal, giúp bạn học một cách kín đáo.
+[![Release](https://img.shields.io/github/v/release/viys/stealthlingo)](https://github.com/viys/stealthlingo/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 
-StealthLingo là một công cụ dòng lệnh (CLI) nhỏ viết bằng Rust để luyện từ vựng trong những phút rảnh rỗi: tra một từ, lưu lại, rồi luyện nó bằng thẻ ghi nhớ (flashcard), chính tả, điền chữ còn thiếu, nghe rồi viết chính tả hoặc kết hợp tất cả, hướng tới mục tiêu số từ mỗi ngày. Esc ẩn toàn bộ màn hình chỉ trong một lần nhấn. Dữ liệu từ điển lấy từ [Wiktionary](https://en.wiktionary.org/) tiếng Anh qua API chính thức của Wikimedia, không cần khóa API; lịch ôn tập, việc chấm đáp án và tiến độ học của bạn được lưu trong cơ sở dữ liệu SQLite trên máy, nên có thể ôn các từ đã lưu khi không có mạng. Tác tử AI cũng có thể thêm những từ bạn có thể chưa biết trong lúc bạn đọc hoặc viết mã (xem [Tác tử AI](#tác-tử-ai-mcp)).
+Luyện vài từ tiếng Anh trong lúc đang trốn việc. Nhấn **Esc** thì màn hình lại là terminal; nhấn Esc lần nữa là quay lại. Đồng hồ tạm dừng khi đang ẩn.
 
-Phiên bản v0.1 chỉ hỗ trợ học tiếng Anh.
+Khoảng trống đó là bất cứ thứ bạn vốn đã có — một lần build, cuộc họp bạn không thực sự ngồi, hay lúc chờ AI trả lời. Tra một từ, lưu lại, rồi luyện flashcard, chính tả hoặc nghe vài phút. Dữ liệu từ điển lấy từ [Wiktionary](https://en.wiktionary.org/) tiếng Anh (không cần API key). Tiến độ lưu trong SQLite cục bộ, nên từ đã lưu vẫn luyện được offline. Máy chủ MCP tùy chọn để agent thêm những từ nó nhận ra; bản thân StealthLingo không bao giờ gọi mô hình AI.
 
-![Màn hình chính của StealthLingo: mục tiêu hôm nay, các từ cần ôn và menu luyện tập](../images/home.png)
+![Trang chủ — mục tiêu ngày, từ đến hạn và menu luyện tập](../images/home.png)
+
+Hướng dẫn đầy đủ trong **[Wiki](https://github.com/viys/stealthlingo/wiki)** (phím, lệnh, chế độ, MCP, sao lưu, FAQ, phát triển). v0.1 chỉ hỗ trợ tiếng Anh.
+
+## Vì sao StealthLingo
+
+Một khoảng trống bạn rời đi ngay được: một buổi ngắn, Esc khi có người tới, và danh sách lớn dần từ những từ bạn thật sự gặp — trong tài liệu, code hay chat.
+
+| Có | Không có |
+|---|---|
+| TUI toàn màn hình hoặc prompt `--plain` | Tài khoản, đồng bộ đám mây hay GUI |
+| Esc ẩn màn hình; đồng hồ tạm dừng khi đang ẩn | Phải thoát app mới giấu được màn hình |
+| Flashcard, chính tả, chữ thiếu, nghe, hỗn hợp, luyện lại lỗi | Định nghĩa do AI viết |
+| Mục tiêu từ mỗi ngày + lặp cách quãng (SM-2 rút gọn) | Khóa học dài bắt buộc |
+| Âm thanh UK / US khi Wiktionary có | Mạng bắt buộc để ôn |
 
 ## Cài đặt
 
-Trên [trang Releases](https://github.com/viys/stealthlingo/releases) có sẵn chương trình đã biên dịch cho Windows (x64), macOS (Intel và Apple silicon) và Linux (x64 và ARM64); không cần cài Rust. Trình cài đặt sẽ đặt `stealthlingo` và chương trình hỗ trợ liên kết `stealthlingo-link` vào `~/.cargo/bin`, rồi thêm thư mục đó vào `PATH`.
-
-Windows (PowerShell):
+Binary sẵn cho Windows, macOS và Linux — không cần Rust:
 
 ```powershell
+# Windows (PowerShell)
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/viys/stealthlingo/releases/latest/download/stealthlingo-installer.ps1 | iex"
 ```
 
-macOS và Linux:
-
 ```bash
+# macOS / Linux
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/viys/stealthlingo/releases/latest/download/stealthlingo-installer.sh | sh
 ```
 
-Hoặc tải tệp nén cho hệ điều hành của bạn từ trang Releases, giải nén và giữ `stealthlingo` cùng `stealthlingo-link` trong cùng một thư mục. Trên Linux, việc phát âm thanh dùng ALSA (`libasound2`), vốn có sẵn trên các bản phân phối dành cho máy tính để bàn.
-
-### Biên dịch từ mã nguồn
-
-Cần bộ công cụ Rust bản ổn định gần đây (1.88 trở lên) và một trình biên dịch C (SQLite đã được tích hợp sẵn).
+Hoặc từ mã nguồn (Rust 1.88+; Linux cần `libasound2-dev` để build):
 
 ```bash
 cargo install --git https://github.com/viys/stealthlingo
-# hoặc, từ bản sao cục bộ của kho mã
-cargo install --path .
-cargo run -- --help
 ```
-
-Trên Linux, để biên dịch còn cần gói phát triển ALSA (ví dụ `libasound2-dev`).
 
 ## Bắt đầu nhanh
 
 ```bash
-stealthlingo lookup ephemeral               # phát âm và các nghĩa chính (--all để xem tất cả)
-stealthlingo add ephemeral --note "phù du"  # lưu từ, kèm ghi chú cá nhân tùy chọn
-stealthlingo                                # mở ứng dụng toàn màn hình: luyện tập, tra từ, xem danh sách, thống kê
+stealthlingo                           # app toàn màn hình; Esc để ẩn
+stealthlingo study --minutes 3         # một buổi vừa khít khoảng trống
+stealthlingo lookup ephemeral          # phát âm + định nghĩa chính (--all để xem hết)
+stealthlingo add ephemeral --note "lasting a short time"
+stealthlingo --plain                   # prompt từng dòng
 ```
 
-## Giao diện toàn màn hình
+Trang chủ: `r` ôn · `a` luyện · `/` tra từ · `w` danh sách · `t` thống kê · `c` cài đặt · **Esc** ẩn · **Ctrl+C** thoát (`q` chỉ quay lại).
 
-Trong terminal, `stealthlingo`, `study` và `review` sẽ mở giao diện toàn màn hình. Màn hình chính cho biết hôm nay cần ôn gì, tiến độ mục tiêu hằng ngày và một menu (`r` ôn tập, `a` luyện tập, `/` tra từ, `w` danh sách từ, `t` thống kê, `c` thiết lập); `↑`/`↓` (hoặc `k`/`j`) để di chuyển, `Enter` hoặc `l` để xác nhận. Mục Luyện tập mở một menu con gồm mọi chế độ luyện tập (`s` thẻ ghi nhớ, `p` chính tả, `m` điền chữ còn thiếu, `i` nghe, `x` luyện tập hỗn hợp, `e` luyện lại từ sai); `h` hoặc `Backspace` để quay lại. Các phím này cũng bắt đầu luyện tập ngay từ màn hình chính. Danh sách và các trang dài cuộn bằng cùng các phím đó. Khi đang gõ một từ, ghi chú hoặc bộ lọc, `l` là một chữ cái và `Enter` xác nhận.
-
-![Esc ẩn ứng dụng và hiện shell; nhấn Esc lần nữa để quay lại](../images/boss-key.webp)
-
-- **Esc ẩn mọi thứ ngay lập tức** và hiện lại shell mà bạn đã dùng để mở chương trình; nhấn Esc lần nữa để quay lại. Đồng hồ của phiên học tạm dừng khi đang ẩn.
-- **Thẻ ghi nhớ** không cần Enter: `Space` hoặc `l` hiện đáp án, `1`–`4` để tự chấm, `a` phát âm từ, `s` bỏ qua, `q` kết thúc phiên.
-- **Giọng đọc**: `a` phát giọng mặc định của bạn (thiết lập `accent`) trước; nhấn lại trên cùng một từ sẽ phát giọng còn lại đã được thu âm, và cứ thế luân phiên. Thanh dưới cho biết giọng nào sẽ phát tiếp theo, thanh trên cho biết giọng nào đang phát.
-- **Chính tả và nghe**: gõ từ rồi nhấn `Enter`. Ở màn kết quả, `Enter` hoặc `l` để tiếp tục. `Tab` hiện đáp án, `Ctrl+N` bỏ qua. Khi luyện nghe, nhấn `Enter` trên dòng trống để phát lại bản ghi âm, `Ctrl+R` để phát giọng còn lại. Khi trả lời sai, chương trình chỉ ra những chữ cái bị thừa hoặc thiếu. Câu hỏi điền chữ còn thiếu hiển thị từ với một số chữ cái bị che (`e _ h e _ e r _ l`); hãy gõ cả từ.
-- **Danh sách từ**: `/` để lọc theo chữ, `s` lần lượt chọn trạng thái, `p` lần lượt chọn từ loại, `u` chỉ hiện các từ đến hạn. `Enter` hoặc `l` mở mục từ đã lưu (dùng được khi ngoại tuyến), `a` phát âm, `n` sửa ghi chú, `d` rồi `y` hoặc `l` để xóa từ (lưu lại từ đó sẽ khôi phục tiến độ). `PgUp`/`PgDn` và `g`/`G` giúp di chuyển nhanh trong danh sách dài. Các từ do tác tử AI thêm được đánh dấu `agent`, và khi chọn, phần chi tiết bên dưới hiển thị lý do mà tác tử đưa ra.
-- **Thiết lập** (`c`): `←`/`→` thay đổi giá trị đang chọn, `PgUp`/`PgDn` mỗi lần 10, `Enter` hoặc `l` để gõ số và xác nhận, `r` khôi phục giá trị mặc định, `R` rồi `y` hoặc `l` khôi phục mọi thiết lập. Mỗi thay đổi được lưu ngay; giá trị nằm ngoài phạm vi cho phép sẽ không được lưu.
-- **Tra từ**: gõ một từ rồi nhấn `Enter`; sau đó `s` để lưu hoặc xóa từ, `a` để phát âm, `Tab` chuyển giữa mục từ rút gọn và đầy đủ, `/` để tra từ mới, `q` để quay lại.
-- `Ctrl+C` chỉ có nghĩa là quay lại khi bạn đang gõ: trong luyện chính tả, điền chữ còn thiếu hoặc nghe, nó kết thúc phiên; trong ô tra từ, bộ lọc hoặc ghi chú của danh sách từ, hay khi nhập giá trị thiết lập, nó hủy phần đang nhập. Trong các trường hợp khác nó thoát chương trình. Đây là cách duy nhất để thoát, nên lỡ nhấn thêm `q` cũng không đóng ứng dụng. Ở màn hình kết quả, `q` và `Space` không làm gì cả; `Enter` hoặc `l` để về màn hình chính. Mỗi câu trả lời được lưu ngay khi bạn trả lời.
-- Giao diện cần terminal tối thiểu 40×12 ký tự. Khi cửa sổ thấp, các khung sẽ thu nhỏ, phần tóm tắt ở màn hình chính gói gọn trong một dòng và menu chia thành hai cột (cửa sổ rộng) hoặc có thể cuộn, để mục đang chọn và ô nhập đáp án luôn hiển thị.
-
-![Thẻ ghi nhớ đã hiện nghĩa, đang chờ tự chấm](../images/flashcard.png)
-
-![Trả lời sai chính tả: chữ cái bị thiếu được đánh dấu trong đáp án](../images/spelling.png)
-
-![Tra từ: phát âm Anh, Mỹ và các nghĩa chính](../images/lookup.png)
-
-`--plain` (hoặc khi đầu vào/đầu ra không phải terminal, ví dụ khi dùng pipe) sẽ dùng chế độ hỏi từng dòng được mô tả bên dưới. `NO_COLOR` tắt màu.
+Chế độ luyện (`a`, hoặc bấm thẳng chữ cái): `s` flashcard · `p` chính tả · `m` chữ thiếu · `i` nghe · `x` hỗn hợp · `e` luyện lại lỗi.
 
 ## Lệnh
 
-| Lệnh | Chức năng |
+| Lệnh | Việc làm |
 |---|---|
-| `stealthlingo` | Mở ứng dụng toàn màn hình. Với `--plain`: ôn các từ đến hạn; nếu không có từ nào đến hạn thì học từ mới; nếu danh sách trống thì hướng dẫn cách bắt đầu |
-| `lookup <WORD> [--all]` | Tra Wiktionary (làm mới bộ nhớ đệm; khi ngoại tuyến thì dùng bản đã lưu đệm) |
-| `add <WORD> [--note TEXT]` | Lưu một từ. Lưu hai lần cũng không sao; `--note` cập nhật ghi chú |
-| `remove <WORD>` | Xóa từ khỏi danh sách (dữ liệu từ điển đã lưu đệm và lịch sử trả lời vẫn được giữ) |
-| `words [--status S] [--pos P] [--due]` | Liệt kê các từ đã lưu cùng trạng thái, thời điểm đến hạn và người thêm, có thể lọc |
-| `search <QUERY> [--status S] [--pos P] [--due]` | Tìm trong các từ đã lưu và ghi chú |
-| `study [--mode memory\|spelling\|letters\|listening\|mixed] [--mistakes] [--minutes N] [--count N]` | Phiên học |
-| `review [--count N] [--minutes N]` | Ôn bằng thẻ ghi nhớ, chỉ với các từ đến hạn |
-| `stats` | Số từ đã lưu theo trạng thái, số từ đến hạn, mục tiêu hằng ngày và 7 ngày gần nhất, số câu trả lời hôm nay và từ trước đến nay kèm tỉ lệ đúng, lần ôn tiếp theo |
-| `audio <WORD> [--accent uk\|us]` | Phát âm (mặc định theo thiết lập `accent`) |
-| `config` / `config set <KEY> <VALUE>` / `config reset [KEY]` | Xem, thay đổi hoặc khôi phục thiết lập; xem vị trí dữ liệu |
-| `links [status\|install\|uninstall]` | Ctrl+nhấp trong `lookup` để phát âm và thêm hoặc xóa từ (Windows) |
-| `export <PATH>` / `import <PATH>` | `.json` là bản sao lưu đầy đủ, `.csv` là danh sách từ |
-| `mcp` | Phục vụ tác tử AI qua MCP trên stdin/stdout; do ứng dụng khách của tác tử khởi chạy (xem phần Tác tử AI bên dưới) |
-
-Nếu không có `--minutes` hoặc `--count`, một phiên kéo dài `default_minutes` (5) phút. Các phiên bắt đầu từ màn hình chính, hoặc bằng `stealthlingo --plain`, thì kéo dài đến khi đạt mục tiêu hằng ngày (xem [Mục tiêu hằng ngày](#mục-tiêu-hằng-ngày)).
-
-Các bộ lọc danh sách từ có thể kết hợp: `--status` là `new`, `learning`, `review` hoặc `mastered`; `--pos` khớp với phần đầu của từ loại (`adj`, `n`, `verb`); `--due` chỉ giữ các từ đã đến lúc ôn.
+| `stealthlingo` | Mở app toàn màn hình |
+| `lookup <WORD> [--all]` | Tra Wiktionary (offline dùng cache) |
+| `add` / `remove` | Lưu hoặc xóa từ |
+| `words` / `search` | Liệt kê hoặc tìm (`--status`, `--pos`, `--due`) |
+| `study` / `review` | Luyện (`--mode`, `--mistakes`, `--minutes`, `--count`) |
+| `stats` | Tiến độ và độ chính xác |
+| `audio <WORD>` | Phát âm |
+| `config` | Xem hoặc đổi cấu hình |
+| `export` / `import` | Sao lưu `.json` hoặc danh sách `.csv` |
+| `mcp` | Máy chủ MCP cho AI agent |
+| `links` | Tra từ bấm được (Windows) |
 
 ```bash
-stealthlingo words --status learning --pos adj
-stealthlingo words --due
+stealthlingo study --mode spelling --count 10
+stealthlingo study --mode listening --minutes 5
+stealthlingo study --mistakes
+stealthlingo review
 ```
 
-`lookup` hiển thị cách phát âm trên một dòng, giọng Anh (UK) trước rồi đến giọng Mỹ (US) (`Pronunciation: UK /njuː/ · US /nu/`), và cho biết giọng của bản ghi âm mà `audio` sẽ phát (hoặc gợi ý `--accent uk|us` khi có cả hai). Mặc định, sau đó chương trình liệt kê ba nghĩa đầu tiên của tối đa ba từ loại. `lookup --all` (hoặc `-a`) hiển thị mọi nghĩa kèm ví dụ, từ đồng nghĩa, từ trái nghĩa và nguồn. Các nghĩa được ngắt dòng theo độ rộng terminal, các dòng tiếp theo được thụt lề.
+## AI agent (MCP)
 
-### Tra từ có thể nhấp (Windows)
-
-```bash
-stealthlingo links install   # chạy một lần sau khi cài đặt
-```
-
-Lệnh này đăng ký trình xử lý liên kết `stealthlingo://` cho tài khoản của bạn (không cần quyền quản trị). Sau đó, `lookup` biến mỗi cách phát âm có bản ghi âm thành siêu liên kết trong terminal: Ctrl+nhấp vào đó để phát bản ghi âm ở chế độ nền, không mở trình duyệt hay cửa sổ nào. Dòng cuối cùng trở thành `+ Add to word list`, hoặc `Saved in your word list · Remove` với từ đã lưu; Ctrl+nhấp vào đó để thêm hoặc xóa từ mà không cần gõ lệnh (chạy lại `lookup` để thấy thay đổi). Vì các chương trình khác cũng có thể mở những liên kết này, việc xóa từ bằng liên kết sẽ giữ lại tiến độ học: thêm lại từ đó, bằng liên kết hoặc bằng `add`, sẽ khôi phục tiến độ. Ngược lại, lệnh `remove` khiến từ đó bắt đầu lại từ đầu. Tính năng này hoạt động trong các terminal hiển thị được siêu liên kết (Windows Terminal, VS Code / Cursor); ở các terminal khác, `lookup` in văn bản thường kèm các lệnh `add` và `audio`. `links status` cho biết kết quả phát hiện, `FORCE_HYPERLINK=1` (hoặc `0`) ghi đè kết quả phát hiện, và `links uninstall` gỡ trình xử lý. Lỗi được ghi vào `link-errors.log` trong thư mục dữ liệu.
-
-### Chế độ học
-
-Các phím dưới đây dành cho chế độ hỏi từng dòng (`--plain`); giao diện toàn màn hình dùng các phím đơn như đã mô tả ở trên.
-
-- **memory (ghi nhớ)**: xem từ, nhấn Enter để hiện nghĩa, rồi tự đánh giá: `1` Again (lại), `2` Hard (khó), `3` Good (tốt), `4` Easy (dễ). Nhấn `a` để nghe từ.
-- **spelling (chính tả)**: đọc định nghĩa (bản thân từ đó được che trong định nghĩa và ví dụ) rồi gõ từ. `?` để bỏ cuộc và xem đáp án.
-- **letters (điền chữ còn thiếu)**: giống chính tả, nhưng khoảng một nửa số chữ cái được hiển thị (`e _ h e _ e r _ l`). Mỗi từ luôn bị che ở cùng các vị trí. Câu trả lời được tính là luyện chính tả.
-- **listening (nghe)**: nghe phát âm rồi gõ từ. `r` để phát lại. Chỉ dùng các từ có âm thanh phát âm.
-- **mixed (hỗn hợp)**: các từ chưa từng học bắt đầu bằng thẻ ghi nhớ; các từ còn lại luân phiên giữa thẻ ghi nhớ, chính tả và (khi có bản ghi âm) nghe.
-
-`--mistakes` luyện các từ bạn trả lời sai trong 30 ngày gần nhất, hoặc đã quên sau khi học thuộc, bắt đầu từ lỗi gần nhất, bất kể đã đến hạn hay chưa. Tùy chọn này dùng được với mọi chế độ; trên màn hình chính, `e` dùng luyện tập hỗn hợp.
-
-Ở mọi chế độ, `s` bỏ qua từ hiện tại mà không ghi nhận câu trả lời, `q` kết thúc phiên. Khi đang gõ câu trả lời, Ctrl+C cũng kết thúc phiên; ở thẻ ghi nhớ hoặc màn hình kết quả, nó thoát chương trình, và với `--plain`, nhấn Ctrl+C lần thứ hai sẽ thoát ngay. Mỗi câu trả lời đã gửi được lưu ngay lập tức, nên thoát giữa chừng không làm mất phần đã làm, và câu hỏi chưa trả lời không bao giờ bị tính là sai.
-
-Việc chấm đáp án bỏ qua chữ hoa/chữ thường và khoảng trắng ở đầu và cuối, nhưng dấu nháy đơn và dấu gạch nối vẫn được tính (`well-being` khác `wellbeing`).
-
-### Lịch ôn tập
-
-Một thuật toán SM-2 giản lược quyết định khi nào một từ quay lại:
-
-- **Again**: quay lại sau 10 phút; tiến độ bị đặt lại.
-- **Hard**: khoảng cách ngắn hơn bình thường.
-- **Good**: 1 ngày, rồi 3 ngày, sau đó khoảng cách tăng theo hệ số dễ (ease factor) của từ.
-- **Easy**: khoảng cách dài hơn, và từ đó trở đi từ này được coi là dễ hơn.
-
-Trong luyện chính tả và nghe, trả lời đúng được tính là Good, sai được tính là Again. Từ trả lời sai sẽ xuất hiện thêm một lần nữa ở cuối chính phiên đó. Các từ đến hạn ôn luôn được ưu tiên trước từ mới, và mỗi ngày chỉ đưa vào tối đa `daily_new_limit` (mặc định 10) từ chưa từng học. Các từ có khoảng cách từ 21 ngày trở lên được hiển thị là `mastered` (đã thuộc).
-
-### Mục tiêu hằng ngày
-
-`daily_goal` (mặc định 10) là số từ khác nhau cần luyện mỗi ngày; trả lời lại cùng một từ không được tính hai lần. Màn hình chính, trang thống kê và `stats` hiển thị tiến độ hôm nay, và `stats` còn hiển thị 7 ngày gần nhất. Cho đến khi đạt mục tiêu, các phiên bắt đầu từ màn hình chính (hoặc bằng `stealthlingo --plain`) sẽ kết thúc khi đạt mục tiêu thay vì sau `default_minutes`; nếu hết từ trước, phiên sẽ cho biết còn thiếu bao nhiêu từ. `--minutes` hoặc `--count` được chỉ định rõ luôn được ưu tiên. `0` tắt mục tiêu.
-
-## Cấu hình
-
-Thay đổi thiết lập trong màn hình thiết lập (`c` trên màn hình chính) hoặc bằng `config`:
-
-```bash
-stealthlingo config set daily_goal 20
-stealthlingo config set daily_new_limit 15
-stealthlingo config set default_minutes 3
-stealthlingo config set accent us        # ưu tiên phát bản ghi âm giọng Mỹ (mặc định: uk)
-stealthlingo config reset daily_goal     # trở về giá trị mặc định
-stealthlingo config reset                # mọi thiết lập, sau khi xác nhận (--yes bỏ qua xác nhận)
-```
-
-| Khóa | Mặc định | Phạm vi | Ý nghĩa |
-|---|---|---|---|
-| `daily_goal` | 10 | 0–500, 0 = tắt | Số từ khác nhau cần luyện mỗi ngày |
-| `daily_new_limit` | 10 | 0–200, 0 = chỉ ôn tập | Số từ chưa từng học được đưa vào mỗi ngày |
-| `default_minutes` | 5 | 1–120 | Độ dài phiên khi không có `--minutes` hoặc `--count` |
-| `accent` | uk | uk / us | Giọng được phát trước |
-| `mcp_daily_add_limit` | 30 | 0–200, 0 = tắt | Số từ các tác tử AI được thêm mỗi ngày qua MCP |
-| `http_timeout_secs` | 10 | 1–120 | Thời gian chờ mạng |
-
-`config` liệt kê từng giá trị cùng giá trị mặc định và phạm vi. Nếu `config.json` chứa giá trị ngoài phạm vi, StealthLingo sẽ cảnh báo và dùng giá trị hợp lệ gần nhất mà không ghi đè tệp. Từ chỉ có bản ghi âm một giọng thì luôn phát bản ghi âm đó.
-
-### Từ điển
-
-StealthLingo dùng API Wiktionary chính thức của Wikimedia: định nghĩa và ví dụ lấy từ REST API, còn IPA (gắn nhãn theo giọng), từ đồng nghĩa, từ trái nghĩa và bản ghi âm trên Wikimedia Commons (OGG) lấy từ mã nguồn của trang. Khi dạng bạn gõ khác với mục từ trong từ điển (`Ephemeral` và `ephemeral`), dạng bạn gõ sẽ được ghi nhớ, nên `add` và `remove` đều chỉ cùng một từ đã lưu.
-
-Các bản phát triển trước khi phát hành v0.1.0 còn có thể dùng Free Dictionary API hoặc Merriam-Webster. Những từ được lưu đệm từ các nguồn đó vẫn đọc được khi ngoại tuyến, và sẽ được thay bằng dữ liệu Wiktionary ở lần tra tiếp theo (tiến độ học và ghi chú được giữ nguyên). Các thiết lập cũ của chúng trong `config.json` sẽ bị bỏ qua.
-
-## Tác tử AI (MCP)
-
-`stealthlingo mcp` chạy một máy chủ [Model Context Protocol](https://modelcontextprotocol.io) trên stdin/stdout, để tác tử AI (Cursor, Claude Desktop hoặc ứng dụng khách MCP khác) có thể tra từ và thêm những từ bạn có thể chưa biết vào danh sách học trong lúc bạn đọc hoặc viết mã. Bản thân StealthLingo không bao giờ gọi mô hình AI. Thêm nó vào cấu hình MCP của ứng dụng khách (với Cursor là `~/.cursor/mcp.json`, hoặc `.cursor/mcp.json` trong một dự án):
+Lúc bạn đang làm việc thật, agent có thể lưu từ cho lần trốn việc sau. Trỏ client tới StealthLingo (ví dụ Cursor `~/.cursor/mcp.json`):
 
 ```json
 {
@@ -187,82 +96,21 @@ Các bản phát triển trước khi phát hành v0.1.0 còn có thể dùng Fr
 }
 ```
 
-Nếu `stealthlingo` không có trong `PATH`, hãy ghi đường dẫn đầy đủ của tệp thực thi vào `command`. Sau đó hãy nhờ tác tử, ví dụ, thêm những từ trên trang này mà bạn có thể chưa biết.
+Agent có thể tra từ và thêm vào danh sách. Không thể xóa từ, đổi cài đặt hay ghi câu trả lời. Chi tiết: [Wiki · AI Agents](https://github.com/viys/stealthlingo/wiki/AI-Agents-MCP).
 
-| Công cụ | Chức năng |
-|---|---|
-| `get_study_status` | Số từ đã lưu, đến hạn và chưa bắt đầu học, tiến độ mục tiêu và độ chính xác hôm nay, và số từ các tác tử còn được thêm hôm nay |
-| `list_words` | Các từ đã lưu cùng trạng thái, thời điểm đến hạn, âm thanh, số lần quên và định nghĩa ngắn; `query`, `status` và `limit` thu hẹp danh sách. Ghi chú không bao giờ được chia sẻ |
-| `lookup_word` | Mục Wiktionary của một từ (ưu tiên bộ nhớ đệm), không lưu từ đó |
-| `add_words` | Lưu tối đa 20 từ mỗi lần gọi, mỗi từ có thể kèm `reason` tùy chọn; báo kết quả cho từng từ |
+## Dữ liệu & sao lưu
 
-Tác tử chỉ chọn từ:
-
-- Định nghĩa, ví dụ và phát âm chỉ lấy từ Wiktionary. Tác tử có thể cho biết từ xuất hiện ở đâu (`reason`), nhưng không thể viết định nghĩa, bản dịch hay ghi chú của bạn. Những từ Wiktionary không có sẽ không được thêm.
-- Không có công cụ nào để xóa từ, thay đổi thiết lập hay ghi lại câu trả lời.
-- Những từ bạn đã xóa (bằng `remove`, `d` trong danh sách từ, hoặc một liên kết) sẽ không bao giờ bị tác tử thêm lại; nếu bạn tự lưu lại, từ đó sẽ dùng được trở lại.
-- Mỗi ngày tác tử chỉ được thêm tối đa `mcp_daily_add_limit` (mặc định 30) từ, và xóa một từ không trả lại lượt. `0` tắt việc thêm từ. Thay đổi có hiệu lực từ lần gọi tiếp theo, không cần khởi động lại ứng dụng khách.
-- Các từ do tác tử thêm được học như mọi từ khác. Danh sách từ đánh dấu chúng là `agent` và hiển thị lý do của tác tử; `words` cho biết ai đã thêm từng từ ở cột `BY`. Bản sao lưu JSON giữ cả hai thông tin này, cùng các từ bạn đã xóa.
-
-## Thư mục dữ liệu
-
-`stealthlingo config` in ra đường dẫn chính xác. Mặc định:
-
-| Hệ điều hành | Vị trí |
-|---|---|
-| Windows | `%APPDATA%\stealthlingo\data` |
-| macOS | `~/Library/Application Support/stealthlingo` |
-| Linux | `~/.local/share/stealthlingo` |
-
-Đặt `STEALTHLINGO_HOME` để dùng thư mục khác (tiện cho bản di động hoặc khi thử nghiệm). Thư mục này chứa `stealthlingo.db` (SQLite, có migration theo phiên bản), `config.json` và `audio/` (các tệp phát âm đã tải về).
-
-### Sao lưu và danh sách từ
+Thư mục dữ liệu mặc định: `%APPDATA%\stealthlingo\data` (Windows), `~/Library/Application Support/stealthlingo` (macOS), `~/.local/share/stealthlingo` (Linux). Ghi đè bằng `STEALTHLINGO_HOME`.
 
 ```bash
-stealthlingo export backup.json   # mọi thứ: bộ nhớ đệm, tiến độ, lịch sử trả lời
-stealthlingo import backup.json   # gộp; nhập lại cùng một tệp không thay đổi gì
-stealthlingo export words.csv     # word, note, status, due_at, definition
-stealthlingo import examples/words.csv   # cột "word" (nếu không có thì dùng cột đầu tiên); cột "note" là tùy chọn
+stealthlingo export backup.json    # sao lưu đầy đủ
+stealthlingo import backup.json    # gộp (tiến độ mới hơn thắng)
 ```
 
-Khi cùng một từ có ở cả hai phía trong lần nhập JSON, tiến độ được ôn gần đây nhất sẽ được giữ. Nhập CSV sẽ tra từng từ chưa có trong bộ nhớ đệm, nên cần kết nối mạng.
+## Đóng góp
 
-## Hoạt động ngoại tuyến
-
-- Học, ôn tập, `words`, `search` và `stats` không bao giờ dùng mạng.
-- `lookup` làm mới dữ liệu từ Wiktionary, và hiển thị bản lưu đệm nếu không kết nối được.
-- `add` và `audio` dùng bộ nhớ đệm khi có thể và chỉ kết nối mạng với từ mới.
-- Trong `mcp`, `get_study_status` và `list_words` không bao giờ kết nối mạng; `lookup_word` và `add_words` chỉ kết nối mạng với từ chưa có trong bộ nhớ đệm.
-- Âm thanh phát âm được tải về ở lần phát đầu tiên và được dùng lại sau đó.
-
-## Về dữ liệu từ điển
-
-- Mỗi mục từ kèm URL nguồn và giấy phép, có thể xem bằng `lookup --all`. Nội dung Wiktionary được cấp phép CC BY-SA 4.0.
-- Mức độ đầy đủ khác nhau tùy từ: phiên âm, âm thanh, ví dụ, từ đồng nghĩa và trái nghĩa đều có thể thiếu. StealthLingo coi mọi trường là tùy chọn; từ không có âm thanh sẽ bị bỏ qua khi luyện nghe.
-- Wiktionary không phải dịch vụ dịch thuật. Gợi ý bằng tiếng Việt (hoặc bất kỳ ngôn ngữ nào khác) đến từ `--note` do chính bạn ghi, không bao giờ đến từ từ điển.
-- Dịch vụ này miễn phí và có thể chậm hoặc ngừng hoạt động. Hãy tôn trọng điều khoản sử dụng của Wikimedia, và không phân phối lại hàng loạt dữ liệu đã lưu đệm khi chưa tuân thủ giấy phép.
-
-## Phát triển
-
-```bash
-cargo test
-cargo clippy --all-targets -- -D warnings
-cargo fmt --check
-```
-
-Mã nguồn được chia thành `dictionary` (client và bộ phân tích Wiktionary, ánh xạ sang mô hình `Entry`, kèm bộ giải mã cho dữ liệu được lưu đệm bởi các bản trước khi phát hành), `storage` (SQLite), `learning` (lịch ôn, chấm đáp án, phiên học), `audio`, `commands` và `tui` (giao diện toàn màn hình, xây dựng bằng ratatui). Cả hai giao diện đều dùng chung `learning::session::Session`. Lịch ôn tập là một hàm thuần túy, có bộ kiểm thử riêng trong `tests/scheduling_tests.rs`.
-
-### Phát hành
-
-Các bản phát hành được build bằng [dist](https://github.com/axodotdev/cargo-dist) (`dist-workspace.toml`, `.github/workflows/release.yml`). Tăng `version` trong `Cargo.toml`, commit, rồi đẩy một tag tương ứng:
-
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-Sau đó GitHub Actions sẽ build cho mọi nền tảng và đăng các tệp nén cùng trình cài đặt thành một GitHub Release. `dist plan` cho xem trước những gì sẽ được build; sau khi thay đổi `dist-workspace.toml`, chạy `dist generate` để cập nhật workflow.
+Hoan nghênh issue và pull request. Cách build và chạy test: [Wiki · Development](https://github.com/viys/stealthlingo/wiki/Development).
 
 ## Giấy phép
 
-MIT, xem [LICENSE](../../LICENSE).
+MIT — xem [LICENSE](../../LICENSE).

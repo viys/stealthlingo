@@ -7,6 +7,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
+use super::transfer;
 use super::widgets::{self, LineInput};
 use super::{theme, Fx, Target, Tone, View};
 use crate::commands::Context;
@@ -139,6 +140,8 @@ impl Settings {
             },
             KeyCode::Char('r') => self.change(ctx, fx, |config| setting.reset(config)),
             KeyCode::Char('R') => self.mode = Mode::ConfirmResetAll,
+            KeyCode::Char('e') => fx.go(Target::Transfer(transfer::Start::Export)),
+            KeyCode::Char('i') => fx.go(Target::Transfer(transfer::Start::Import)),
             KeyCode::Char('q') | KeyCode::Backspace => fx.go(Target::Home),
             _ => {}
         }
@@ -290,6 +293,8 @@ impl View for Settings {
                 ("Enter/l", "type"),
                 ("r", "reset"),
                 ("R", "reset all"),
+                ("e", "export"),
+                ("i", "import"),
                 ("q", "back"),
             ],
             Mode::Typing(_) => vec![("Enter/l", "save"), ("↑↓", "cancel")],

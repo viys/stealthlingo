@@ -35,7 +35,7 @@ $env:STEALTHLINGO_HOME = "$env:TEMP\sl-dev"; cargo run -- stats
 | `src/learning/` | 排程（纯函数 SM-2）、会话 `Session`、拼写判定 |
 | `src/audio/` | 发音下载缓存与播放（rodio） |
 | `src/tui/` | 全屏界面，各屏一个文件 |
-| `src/bin/stealthlingo-link.rs` | `stealthlingo://` 链接处理程序（Windows，无窗口） |
+| `src/bin/link-stealthlingo.rs` | `stealthlingo://` 链接处理程序（Windows，无窗口） |
 | `migrations/` | 按编号递增的 SQL 迁移 |
 | `tests/` | 集成测试与 `fixtures/`（Wiktionary 响应样本） |
 

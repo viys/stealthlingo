@@ -2,7 +2,7 @@
 //! `stealthlingo://` URL scheme with the operating system (Windows only), and
 //! `lookup` then prints terminal hyperlinks (OSC 8) such as
 //! `stealthlingo://audio/hostel?accent=US` or `stealthlingo://add/hostel`.
-//! Ctrl+clicking one makes the OS run the windowless `stealthlingo-link`
+//! Ctrl+clicking one makes the OS run the windowless `link-stealthlingo`
 //! program, which plays the recording or adds or removes the word.
 
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use super::{cached_or_fetch, Context};
 use crate::dictionary::normalize_headword;
 
 pub const SCHEME: &str = "stealthlingo";
-const HANDLER_NAME: &str = "stealthlingo-link";
+const HANDLER_NAME: &str = "link-stealthlingo";
 
 /// What a clicked link asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,7 +139,7 @@ pub fn enabled() -> bool {
             .is_some_and(|program| program.is_file())
 }
 
-/// Program path in a registered command such as `"C:\...\stealthlingo-link.exe" "%1"`.
+/// Program path in a registered command such as `"C:\...\link-stealthlingo.exe" "%1"`.
 fn registered_program(command: &str) -> Option<PathBuf> {
     command
         .split('"')
@@ -323,7 +323,7 @@ fn registered_handler() -> Result<Option<String>> {
     if !found {
         return Ok(None);
     }
-    // Output line: `    (Default)    REG_SZ    "C:\...\stealthlingo-link.exe" "%1"`
+    // Output line: `    (Default)    REG_SZ    "C:\...\link-stealthlingo.exe" "%1"`
     Ok(stdout
         .lines()
         .find_map(|line| line.split_once("REG_SZ"))

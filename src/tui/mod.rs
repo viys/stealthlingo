@@ -9,6 +9,7 @@ mod settings;
 mod stats;
 mod study;
 mod theme;
+mod transfer;
 mod widgets;
 mod words;
 
@@ -52,6 +53,7 @@ enum Target {
     Entry(Box<CachedWord>),
     Stats,
     Settings,
+    Transfer(transfer::Start),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -342,6 +344,7 @@ impl App {
             )),
             Target::Stats => Box::new(stats::Stats::load(ctx)?),
             Target::Settings => Box::new(settings::Settings::load(ctx)?),
+            Target::Transfer(start) => Box::new(transfer::Transfer::new(start)),
         };
         Ok(())
     }

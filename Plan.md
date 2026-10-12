@@ -112,6 +112,7 @@ Your spelling: _
 - [x] 按词性、熟悉程度和到期状态筛选词库：`words` / `search` 的 `--status`、`--pos`、`--due`；词库界面 `s` / `p` / `u`。
 - [x] 每日学习目标：新增 `daily_goal`（每天练习的单词数量，不按时间计），首页和 `stats` 显示今日进度，达成时给出一行提示；不强制、不打断会话。
 - [x] 所有配置项都可由用户自己设置：全屏设置界面（首页按 `c`）、`config set`、`config reset`，以及直接编辑 `config.json`（见第 4 节）。
+- [x] 全屏导入导出：设置页 `e` / `i`，与 CLI 相同的 JSON 备份与 CSV 词表。
 
 ### P2 — 后续探索
 
@@ -193,7 +194,7 @@ StealthLingo · Settings
  Words practised today, each counted once. Default: 10
  Saved to C:\Users\...\stealthlingo\config.json
 
-[↑↓] Select  [←→] Adjust  [PgUp/PgDn] ±10  [Enter] Type value  [r] Reset  [R] Reset all  [q] Back
+[↑↓] Select  [←→] Adjust  [PgUp/PgDn] ±10  [Enter] Type value  [r] Reset  [R] Reset all  [e] Export  [i] Import  [q] Back
 ```
 
 - **入口：** 首页菜单 `c`；首页的 `Today 6 / 10 words` 行旁提示 `c` 可调整目标。和词库、统计界面一样，按 `q` 或 Backspace 返回首页（输入数值时 Backspace 用于删除数字）。
@@ -202,13 +203,14 @@ StealthLingo · Settings
 - **直接输入：** 选中数值项按 Enter 进入输入状态，只接受数字；再按 Enter 确认，`↑` / `↓` 移开则放弃输入。超出范围时底部提示允许范围，不保存。
 - **目标可达性提示：** `daily_goal` 超过"今天到期的复习词数 + 今天剩余的新词名额"时，在该项下方提示"按当前词库和 `daily_new_limit`，今天最多能练 N 个词"，但仍允许保存。
 - **恢复默认：** `r` 恢复当前项；`R` 恢复全部，需要再按 `y` 确认。
+- **导入导出：** `e` 打开导出、`i` 打开导入（与 CLI 相同的 `.json` 完整备份 / `.csv` 词表）。路径用 `LineInput` 编辑；导出可用 `Tab` / `←` / `→` 切换格式并同步扩展名；目标已存在或即将导入时需 `y`/`l` 确认。完成后底部 flash 摘要；`q` / Ctrl+C 返回设置。逻辑复用 `commands/io.rs`。
 - **保存：** 每次修改校验通过后立即写入 `config.json`（先写临时文件再替换，避免中途退出时损坏文件），不需要单独的"保存"按钮；底部短暂显示 `Saved`。写入失败时提示原因，界面上的值退回到修改前。
 - **与其他功能的关系：**
   - 老板键 Esc 在设置界面照常生效。
   - 窄终端下隐藏"允许范围"一列，只保留名称和数值。
   - 底部显示配置文件路径和数据目录，与 `config show` 一致。
 - **单一来源：** 每个配置项的键名、显示名、默认值、范围、步长和说明集中定义在 `config.rs` 的一张元数据表里；设置界面、`config set` / `config reset` / `config show` 和 `config.json` 加载时的校验都使用这张表，保证三种方式的规则一致。
-- **测试：** `tests/tui_tests.rs` 增加设置界面用例：选择与调整、范围边界停住、直接输入超范围被拒绝、修改后 `config.json` 内容正确、`r` / `R` 恢复默认、返回首页后目标进度按新的 `daily_goal` 显示。目标模式另加用例：错题重做不增加进度、练够不同单词数即结束、队列不足时提前结束并给出提示。
+- **测试：** `tests/tui_tests.rs` 增加设置界面用例：选择与调整、范围边界停住、直接输入超范围被拒绝、修改后 `config.json` 内容正确、`r` / `R` 恢复默认、返回首页后目标进度按新的 `daily_goal` 显示；以及设置页导入导出（JSON 往返、覆盖确认、非法扩展名、CSV）。目标模式另加用例：错题重做不增加进度、练够不同单词数即结束、队列不足时提前结束并给出提示。
 
 #### 何时生效
 
@@ -484,7 +486,7 @@ stealthlingo/
 │   ├── error.rs
 │   ├── time.rs
 │   ├── bin/
-│   │   └── stealthlingo-link.rs # stealthlingo:// 链接的无窗口处理程序
+│   │   └── link-stealthlingo.rs # stealthlingo:// 链接的无窗口处理程序
 │   ├── commands/                # 每个子命令一个文件，另有 links.rs、io.rs（导入导出）
 │   ├── dictionary/
 │   │   ├── client.rs            # HTTP 请求、超时预算、大小写回退
@@ -505,7 +507,7 @@ stealthlingo/
 │   │   ├── protocol.rs          # JSON-RPC 与 MCP 消息类型
 │   │   ├── server.rs            # stdio 读写循环、分发、版本协商
 │   │   └── tools.rs             # 工具定义、参数校验、结果组装
-│   └── tui/                     # home / study / words / lookup / stats / settings 等界面
+│   └── tui/                     # home / study / words / lookup / stats / settings / transfer 等界面
 └── tests/
     ├── commands_tests.rs
     ├── dictionary_tests.rs
@@ -586,7 +588,7 @@ stealthlingo/
 | 5. 统计与导入导出 | `stats`、JSON / CSV 导入导出、数据库迁移 | 完成 |
 | 6. 全屏界面 | ratatui TUI、老板键、英美音轮换、小终端自适应布局 | 完成，布局仍在打磨 |
 | 7. 发布 | dist 构建五个平台的二进制，生成 shell / PowerShell 安装脚本 | 完成 |
-| 8. 日常使用增强 | 缺字母拼写、错词重练、混合模式、词库筛选、每日学习目标、全屏设置界面与 `config reset` | 完成 |
+| 8. 日常使用增强 | 缺字母拼写、错词重练、混合模式、词库筛选、每日学习目标、全屏设置界面与 `config reset`、设置页导入导出 | 完成 |
 | 9. MCP 接入 | 抽出结构化的收藏函数、迁移 005（来源、移除记录、agent 收藏日志）、`stealthlingo mcp` 与 4 个工具、词库界面显示来源、README 配置说明 | 完成 |
 
 ## 14. v0.1 发布清单

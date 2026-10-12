@@ -141,8 +141,8 @@ pub fn run(cli: Cli) -> Result<()> {
             LinksAction::Uninstall => links::uninstall(),
             LinksAction::Open { link } => links::open(&ctx, &link),
         },
-        Some(Command::Export { path }) => io::export(&ctx, &path),
-        Some(Command::Import { path }) => io::import(&mut ctx, &path),
+        Some(Command::Export { path }) => io::export_cmd(&ctx, &path),
+        Some(Command::Import { path }) => io::import_cmd(&mut ctx, &path),
         Some(Command::Mcp) => crate::mcp::run(&mut ctx),
     }
 }
