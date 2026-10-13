@@ -16,6 +16,7 @@ mod words;
 
 use std::io::{self, IsTerminal};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -26,6 +27,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::{DefaultTerminal, Frame};
+use semver::Version;
 
 use crate::commands::study::{prepare, Prepared, SessionRequest};
 use crate::commands::Context;
@@ -58,6 +60,9 @@ enum Target {
     Settings,
     Transfer(transfer::Start),
 }
+
+/// Narrower headers leave out the new-release notice so the title still fits.
+const UPDATE_MIN_WIDTH: u16 = 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tone {
@@ -204,6 +209,9 @@ pub struct App {
     audio: Option<AudioWorker>,
     hidden: bool,
     quit: bool,
+    /// A newer release, shown in the header.
+    update: Option<String>,
+    update_check: Option<Receiver<Version>>,
 }
 
 impl App {
@@ -214,6 +222,13 @@ impl App {
             audio: None,
             hidden: false,
             quit: false,
+            update: ctx
+                .config
+                .check_updates
+                .then(|| crate::update::known_newer(&ctx.paths))
+                .flatten()
+                .map(|v| v.to_string()),
+            update_check: None,
         };
         if !ctx.config_warnings.is_empty() {
             app.flash = Some(Flash {
@@ -289,13 +304,28 @@ impl App {
         self.apply(ctx, fx);
     }
 
-    /// Picks up finished audio playback.
+    /// Shows the release `check` finds, if it is newer.
+    pub fn watch_update(&mut self, check: Receiver<Version>) {
+        self.update_check = Some(check);
+    }
+
+    /// Picks up finished audio playback and the update check.
     pub fn tick(&mut self) {
         if let Some(err) = self.audio.as_mut().and_then(AudioWorker::poll) {
             self.flash = Some(Flash {
                 text: format!("Could not play audio: {err}"),
                 tone: Tone::Bad,
             });
+        }
+        if let Some(check) = &self.update_check {
+            match check.try_recv() {
+                Ok(version) => {
+                    self.update = Some(version.to_string());
+                    self.update_check = None;
+                }
+                Err(TryRecvError::Disconnected) => self.update_check = None,
+                Err(TryRecvError::Empty) => {}
+            }
         }
     }
 
@@ -405,7 +435,12 @@ impl App {
             Some(None) => "♪ playing   ".to_string(),
             None => String::new(),
         };
+        let update = match &self.update {
+            Some(version) if area.width >= UPDATE_MIN_WIDTH => format!("update {version}   "),
+            _ => String::new(),
+        };
         let right = Line::from(vec![
+            Span::styled(update, theme::dim()),
             Span::styled(playing, theme::accent()),
             Span::styled("Esc", theme::heading()),
             Span::styled(" hide ", theme::dim()),
@@ -481,7 +516,14 @@ impl Drop for Restore {
 }
 
 pub fn run(ctx: &mut Context, start: Start) -> Result<()> {
+    // Study and review never touch the network; only the home screen checks.
+    let at_home = matches!(start, Start::Home);
     let mut app = App::new(ctx, start)?;
+    if at_home {
+        if let Some(check) = crate::commands::update::start_daily_check(ctx) {
+            app.watch_update(check);
+        }
+    }
     let origin = shell::main_screen_origin();
     let mut terminal = ratatui::try_init()?;
     let _restore = Restore::new();

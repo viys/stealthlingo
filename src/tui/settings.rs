@@ -136,7 +136,7 @@ impl Settings {
             KeyCode::PageDown => self.step(ctx, fx, -10),
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('L') => match setting.kind {
                 Kind::Number { .. } => self.mode = Mode::Typing(LineInput::default()),
-                Kind::Accent => self.step(ctx, fx, 1),
+                Kind::Accent | Kind::Switch { .. } => self.step(ctx, fx, 1),
             },
             KeyCode::Char('r') => self.change(ctx, fx, |config| setting.reset(config)),
             KeyCode::Char('R') => self.mode = Mode::ConfirmResetAll,

@@ -44,6 +44,15 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/viys/stealthlingo/relea
 cargo install --git https://github.com/viys/stealthlingo
 ```
 
+Обновление:
+
+```bash
+stealthlingo update            # установить последний релиз
+stealthlingo update --check    # только сообщить, есть ли новый
+```
+
+`update` заменяет копии, установленные скриптами выше; для копии из `cargo install` он выводит команду, которую нужно выполнить. Раз в день StealthLingo проверяет, вышел ли новый релиз (с главного экрана и после `lookup`), и показывает `update X.Y.Z` в заголовке; `stealthlingo config set check_updates off` отключает это.
+
 ## Быстрый старт
 
 ```bash
@@ -75,6 +84,7 @@ stealthlingo --plain                   # построчные промпты
 | `export` / `import` | Бэкап `.json` или список `.csv` |
 | `mcp` | MCP-сервер для ИИ-агентов |
 | `links` | Кликабельный lookup (Windows) |
+| `update [--check]` | Установить последний релиз (`--check` только сообщает) |
 
 ```bash
 stealthlingo study --mode spelling --count 10

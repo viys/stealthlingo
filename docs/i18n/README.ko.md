@@ -44,6 +44,15 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/viys/stealthlingo/relea
 cargo install --git https://github.com/viys/stealthlingo
 ```
 
+업데이트:
+
+```bash
+stealthlingo update            # 최신 릴리스 설치
+stealthlingo update --check    # 새 릴리스가 있는지만 알림
+```
+
+`update`는 위 설치 스크립트로 설치한 사본을 교체합니다. `cargo install`로 설치한 사본이면 대신 실행할 명령을 출력합니다. StealthLingo는 하루에 한 번(홈 화면과 `lookup` 이후) 새 릴리스를 확인하고, 있으면 헤더에 `update X.Y.Z`를 표시합니다. `stealthlingo config set check_updates off`로 끌 수 있습니다.
+
 ## 빠른 시작
 
 ```bash
@@ -75,6 +84,7 @@ Esc로 열린 셸에서도 `lookup`, `add` 같은 명령은 평소처럼 쓸 수
 | `export` / `import` | `.json` 백업 또는 `.csv` 단어 목록 |
 | `mcp` | AI 에이전트용 MCP 서버 |
 | `links` | 클릭 가능한 조회(Windows) |
+| `update [--check]` | 최신 릴리스 설치(`--check`는 알림만) |
 
 ```bash
 stealthlingo study --mode spelling --count 10

@@ -5,7 +5,7 @@ pub mod markup;
 pub mod models;
 pub mod wiktionary;
 
-pub use client::{DictionaryClient, Endpoints, Fetched};
+pub use client::{DictionaryClient, Endpoints, Fetched, USER_AGENT};
 pub use models::{
     accent_from_audio_url, accent_name, clean_word, normalize_audio_url, normalize_headword,
     Definition, Entry, Meaning, Phonetic,

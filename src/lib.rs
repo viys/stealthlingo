@@ -12,3 +12,4 @@ pub mod mcp;
 pub mod storage;
 pub mod time;
 pub mod tui;
+pub mod update;

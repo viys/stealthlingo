@@ -7,8 +7,10 @@ pub mod lookup;
 pub mod review;
 pub mod stats;
 pub mod study;
+pub mod update;
 pub mod words;
 
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
@@ -30,6 +32,8 @@ pub struct Context {
     pub config_warnings: Vec<String>,
     pub db: Database,
     pub endpoints: Endpoints,
+    /// Where new releases of StealthLingo are published.
+    pub releases_url: String,
 }
 
 impl Context {
@@ -47,6 +51,7 @@ impl Context {
             config_warnings,
             db,
             endpoints: Endpoints::default(),
+            releases_url: crate::update::RELEASES_URL.to_string(),
         })
     }
 
@@ -93,6 +98,15 @@ impl Context {
 
 pub fn run(cli: Cli) -> Result<()> {
     crate::learning::session::install_interrupt_handler();
+    if cfg!(windows) {
+        if let Some(dir) = std::env::current_exe()
+            .ok()
+            .as_deref()
+            .and_then(Path::parent)
+        {
+            crate::update::remove_leftovers(dir);
+        }
+    }
     let full_screen = !cli.plain && tui::available();
     let opens_tui = full_screen
         && matches!(
@@ -125,7 +139,10 @@ pub fn run(cli: Cli) -> Result<()> {
             } else {
                 lookup::Detail::Brief
             };
-            lookup::run(&ctx, &word, detail)
+            let check = update::start_daily_check(&ctx);
+            lookup::run(&ctx, &word, detail)?;
+            update::report_daily_check(check);
+            Ok(())
         }
         Some(Command::Add { word, note }) => add::run(&ctx, &word, note.as_deref()),
         Some(Command::Remove { word }) => words::remove(&ctx, &word),
@@ -147,6 +164,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Command::Export { path }) => io::export_cmd(&ctx, &path),
         Some(Command::Import { path }) => io::import_cmd(&mut ctx, &path),
         Some(Command::Mcp) => crate::mcp::run(&mut ctx),
+        Some(Command::Update { check }) => update::run(&ctx, check),
     }
 }
 

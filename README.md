@@ -44,6 +44,15 @@ Or from source (Rust 1.88+; Linux needs `libasound2-dev` to build):
 cargo install --git https://github.com/viys/stealthlingo
 ```
 
+To update:
+
+```bash
+stealthlingo update            # install the latest release
+stealthlingo update --check    # only report whether there is one
+```
+
+`update` replaces copies installed by the scripts above; for a `cargo install` copy it prints the command to run instead. Once a day StealthLingo looks for a new release (from the home screen and after `lookup`) and shows `update X.Y.Z` in the header; `stealthlingo config set check_updates off` turns that off.
+
 ## Quick start
 
 ```bash
@@ -75,6 +84,7 @@ Practice modes (`a`, or jump in with the letter): `s` flashcards · `p` spelling
 | `export` / `import` | `.json` backup or `.csv` word list |
 | `mcp` | MCP server for AI agents |
 | `links` | Clickable lookups (Windows) |
+| `update [--check]` | Install the latest release (`--check` only reports) |
 
 ```bash
 stealthlingo study --mode spelling --count 10

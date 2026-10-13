@@ -35,6 +35,7 @@ $env:STEALTHLINGO_HOME = "$env:TEMP\sl-dev"; cargo run -- stats
 | `src/learning/` | 排程（纯函数 SM-2）、会话 `Session`、拼写判定 |
 | `src/audio/` | 发音下载缓存与播放（rodio） |
 | `src/tui/` | 全屏界面，各屏一个文件 |
+| `src/update.rs` | 检查新版本（读 `releases/latest` 的重定向）、下载校验并替换程序 |
 | `src/bin/link-stealthlingo.rs` | `stealthlingo://` 链接处理程序（Windows，无窗口） |
 | `migrations/` | 按编号递增的 SQL 迁移 |
 | `tests/` | 集成测试与 `fixtures/`（Wiktionary 响应样本） |
@@ -44,7 +45,7 @@ $env:STEALTHLINGO_HOME = "$env:TEMP\sl-dev"; cargo run -- stats
 - **两种界面共用一套逻辑。** TUI 和 `--plain` 都驱动 `learning::session::Session`；学习规则改在 `learning/`，不要在界面层各写一份。
 - **命令和 TUI 只接触 `Entry`。** 不要在 `dictionary` 模块之外解析 Wiktionary 的 JSON 或 wikitext。
 - **所有词典字段都可能缺失**（音标、音频、例句、同义词等），一律按 `Option` / 空集合处理，不能 panic。没有音频的词不进入听音拼写。
-- **离线优先。** 学习、复习、`words`、`search`、`stats` 绝不联网；`lookup` 联网失败时回退缓存；`add`、`audio` 优先用缓存。
+- **离线优先。** 学习、复习、`words`、`search`、`stats` 绝不联网；`lookup` 联网失败时回退缓存；`add`、`audio` 优先用缓存。每日新版本检查只在全屏首页和 `lookup` 后于后台进行，失败不提示。
 - **释义只来自 Wiktionary。** 个人笔记（`personal_note`）只能由用户自己写，不要把翻译或 AI 生成的内容当成词典数据。
 - **已提交的答案立即写库**，未作答不记为答错；数据库写入失败时不能显示保存成功。
 - **不引入异步运行时、Web 框架、ORM 或插件机制。** HTTP 使用 `reqwest` 的 blocking 接口。新增依赖前先确认确实必要。

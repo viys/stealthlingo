@@ -44,6 +44,15 @@ Hoặc từ mã nguồn (Rust 1.88+; Linux cần `libasound2-dev` để build):
 cargo install --git https://github.com/viys/stealthlingo
 ```
 
+Cập nhật:
+
+```bash
+stealthlingo update            # cài bản phát hành mới nhất
+stealthlingo update --check    # chỉ báo có bản mới hay không
+```
+
+`update` thay thế bản được cài bằng các script ở trên; với bản cài bằng `cargo install`, nó in ra lệnh cần chạy. Mỗi ngày một lần StealthLingo kiểm tra bản phát hành mới (từ màn hình chính và sau `lookup`) và hiện `update X.Y.Z` trên thanh tiêu đề; `stealthlingo config set check_updates off` sẽ tắt việc này.
+
 ## Bắt đầu nhanh
 
 ```bash
@@ -75,6 +84,7 @@ Chế độ luyện (`a`, hoặc bấm thẳng chữ cái): `s` flashcard · `p`
 | `export` / `import` | Sao lưu `.json` hoặc danh sách `.csv` |
 | `mcp` | Máy chủ MCP cho AI agent |
 | `links` | Tra từ bấm được (Windows) |
+| `update [--check]` | Cài bản phát hành mới nhất (`--check` chỉ báo) |
 
 ```bash
 stealthlingo study --mode spelling --count 10

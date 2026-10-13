@@ -44,6 +44,15 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/viys/stealthlingo/relea
 cargo install --git https://github.com/viys/stealthlingo
 ```
 
+更新：
+
+```bash
+stealthlingo update            # 安装最新版本
+stealthlingo update --check    # 只报告是否有新版本
+```
+
+`update` 会替换用上面安装脚本装的副本；用 `cargo install` 装的副本则打印需要运行的命令。StealthLingo 每天检查一次新版本（在首页和 `lookup` 之后），有新版本时在标题栏显示 `update X.Y.Z`；`stealthlingo config set check_updates off` 可以关闭。
+
 ## 快速开始
 
 ```bash
@@ -75,6 +84,7 @@ stealthlingo --plain                   # 改为逐行提示
 | `export` / `import` | `.json` 备份或 `.csv` 词表 |
 | `mcp` | 供 AI agent 使用的 MCP 服务器 |
 | `links` | 可点击查词（Windows） |
+| `update [--check]` | 安装最新版本（`--check` 只报告） |
 
 ```bash
 stealthlingo study --mode spelling --count 10

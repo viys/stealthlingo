@@ -4,7 +4,7 @@
 >
 > **核心理念：** 打开终端，几秒进入练习；每轮只花 3–5 分钟；按一下 Esc 就能藏起来；本地保留学习进度；不用网络也能复习已经缓存的词。
 
-> **当前状态（v0.1.6）：** P0 和 P1 全部完成，并已加入全屏 TUI、老板键、英美音选择、可点击查词结果（Windows）、全屏设置界面、供 AI agent 推荐单词的 MCP 服务器和预编译二进制发布。开发阶段使用过的 Free Dictionary API 已经弃用，相关兼容代码已全部移除。
+> **当前状态（v0.1.7）：** P0 和 P1 全部完成，并已加入全屏 TUI、老板键、英美音选择、可点击查词结果（Windows）、全屏设置界面、供 AI agent 推荐单词的 MCP 服务器、预编译二进制发布和软件更新（`update`）。开发阶段使用过的 Free Dictionary API 已经弃用，相关兼容代码已全部移除。
 
 ## 1. 产品原则
 
@@ -120,11 +120,23 @@ Your spelling: _
 - [x] 老板键：Esc 隐藏到一个可用的 shell，再按 Esc 恢复；Esc 不送进这个 shell，隐藏期间会话计时暂停。进入全屏约 1 秒、且界面空闲（没有正在进行的查词等后台任务）后，shell 才在后台预先启动，不拖慢应用启动，首次 Esc 也能立即看到提示符；在此之前按 Esc 则当场启动；后台启动失败或 shell 自行退出时不自动重试，等下次 Esc 再启动并报告错误。shell 启动期间按下的键先缓存，就绪后再送进去。shell 查询光标位置（`ESC[6n`，ConPTY 启动时和部分行编辑器绘制提示符前会问）时按 shell 输出在真实屏幕上的位置回答：Windows 在全屏界面盖住主屏幕前读取光标行（控制台 API，无往返）；Unix 读取光标要和终端往返一次，所以查询先挂起，到首次 Esc 时再读真实光标位置并统一回答。光标跟踪会跳过窗口标题等 OSC 序列，并计入相对移动。这个 shell 带有环境变量 `STEALTHLINGO_SHELL`（所属 StealthLingo 的 PID，Unix 上再加 `:` 和 pty 的终端设备路径）；在其中再运行会打开全屏界面的命令（无参数、`study`、`review`）时直接报错并提示按 Esc 返回，因为 Esc 永远到不了里面那个实例；`lookup`、`add` 等命令和 `--plain` 照常可用。只有所属实例仍在运行且终端对上才算嵌套（Windows 要求该 PID 仍是同名程序，且同一控制台里有它的直接子进程；Unix 要求该 PID 仍存在，且 stdin 的终端设备一致），所以从这个 shell 里开的新窗口、编辑器终端、tmux 等守护进程会继承变量，但不会被误拦。退出时 pty 里的命令随 shell 一起结束，自己开新窗口的程序（`start`、GUI 应用）不受影响；关闭时不等待输出读取线程，免得 Unix 上占着终端的后台任务卡住界面。
 - [x] 可点击的查词结果（Windows）：`links install` 注册 `stealthlingo://` 协议后，在支持超链接的终端中 Ctrl+点击发音即可播放，点击末行即可收藏或移除单词。
 - [x] 预编译二进制和一键安装脚本（Windows / macOS / Linux）。
+- [x] 软件更新：`update` 原地安装最新版本，`update --check` 只报告；每天最多自动检查一次（见下文"软件更新"）。
 - [ ] 可点击链接支持 macOS / Linux (暂无测试条件延缓)。
 - [x] MCP 服务器（`stealthlingo mcp`）：让 Cursor、Claude 等 agent 查词、查看词库，并把推荐学习的单词加入学习列表（见第 8 节）。
 - [ ] 句子听写：需要另外的句子音频或 TTS 来源，Wiktionary 不为例句提供音频。
 - [ ] 自定义词组和专题练习。
 - [ ] 更多语言：为每种语言确认 Wiktionary 对应版本的字段覆盖率和解析方式后再支持。
+
+### 软件更新
+
+- **版本来源：** 不用 GitHub API（未登录时每个 IP 每小时只有 60 次，共享出口的用户很容易用完），而是请求 `github.com/viys/stealthlingo/releases/latest` 并读取重定向地址里的标签（`.../releases/tag/v1.2.3`），不下载页面内容。
+- **每日检查：** `check_updates`（默认 `on`）打开时，每天最多检查一次。只在全屏应用从首页打开时（直接进入 `study` / `review` 会话时不检查）和 `lookup` 命令后进行，都在后台线程里，超时 3 秒，失败不提示。检查前先记下尝试时间，所以连不上 GitHub 时第二天才会再试。结果记在数据目录的 `update_check.json`，不进 JSON 备份。
+- **提示方式：** 全屏界面标题栏右侧显示低调的 `update X.Y.Z`（宽度不足 60 列时不显示，不弹窗、不影响老板键）；`lookup` 只在当次检查发现新版本时往 stderr 打一行。
+- **`update --check`：** 立即检查并报告，不改动任何文件。
+- **`update`：** 只替换安装脚本装的副本——安装脚本写的 receipt（`$XDG_CONFIG_HOME` 或 `%LOCALAPPDATA%` / `~/.config` 下的 `stealthlingo/stealthlingo-receipt.json`）里的安装目录必须是当前程序所在目录；否则（`cargo install`、开发构建等）只打印重新安装的命令。替换流程：读取该版本的 `dist-manifest.json` 找到本平台压缩包和 sha256，下载并校验，从 `.zip` / `.tar.xz` 中取出 `stealthlingo` 和 `link-stealthlingo`，先全部写成 `.new`，再逐个把旧文件改名为 `.old`、新文件改名就位（Windows 不能覆盖正在运行的程序，但可以改名），路径不变，已注册的 `stealthlingo://` 链接继续有效。Windows 上正在运行的 `.old` 在下次启动时删除。最后更新 receipt 里的版本号。校验失败或压缩包缺文件时不改动任何文件。
+- **依赖：** `semver`、`sha2`、`zip`（仅 deflate）、`tar`、`lzma-rs`（纯 Rust 的 xz 解压），全部同步接口。
+- **测试：** `tests/update_tests.rs` 用本地回环服务器模拟重定向、manifest 和下载：zip / tar.xz 都能替换两个程序、校验和不符或缺少校验和时不改动文件、非安装脚本的副本不被替换、`--check` 只记录不安装、旧版本不安装、每日检查一天一次且连不上时也记下尝试。
+
 ## 4. CLI 命令设计
 
 ```text
@@ -152,6 +164,7 @@ Commands:
   export <PATH>                   导出（.json 完整备份 / .csv 词表）
   import <PATH>                   导入（.json 备份 / 含 word 列的 .csv）
   mcp                             以 MCP 服务器方式运行（stdio），供 AI agent 调用
+  update [--check]                安装最新版本；--check 只报告是否有新版本
 ```
 
 不带 `--minutes` 或 `--count` 时，会话时长为 `default_minutes`（默认 5 分钟）。从首页或默认命令开始、且今天还没达成 `daily_goal` 时，改为一直练到今天练过的不同单词数达到目标为止（见下文"每日学习目标"）。
@@ -166,6 +179,7 @@ Commands:
 | `http_timeout_secs` | 10 | 1–120 | 一次查词（含全部请求）的总超时 |
 | `accent` | `UK` | `uk` / `us` | 默认播放的口音 |
 | `mcp_daily_add_limit` | 30 | 0–200，0 表示禁止 agent 收藏 | 每天最多允许 agent 通过 MCP 新收藏的单词数 |
+| `check_updates` | `on` | `on` / `off` | 每天最多检查一次新版本（首页和 `lookup` 后） |
 
 `config.json` 中不在上表的键读取时忽略，下次保存时丢弃；`config set` 遇到未知键会报错并列出可用的键。
 
@@ -190,6 +204,7 @@ StealthLingo · Settings
    Agent adds per day        ◀  30 ▶   0–200, 0 = off
  Network
    Lookup timeout (s)        ◀  10 ▶   1–120
+   Check for updates         ◀  on ▶   on / off
 
  Words practised today, each counted once. Default: 10
  Saved to C:\Users\...\stealthlingo\config.json
@@ -199,7 +214,7 @@ StealthLingo · Settings
 
 - **入口：** 首页菜单 `c`；首页的 `Today 6 / 10 words` 行旁提示 `c` 可调整目标。和词库、统计界面一样，按 `q` 或 Backspace 返回首页（输入数值时 Backspace 用于删除数字）。
 - **分组：** 按学习、音频、Agent（MCP）、网络分组，最常改的 `daily_goal` 放在最上面。每项显示当前值和允许范围，选中项在底部显示一句说明和默认值。
-- **调整数值：** `←` / `→`（或 `-` / `+`）每次加减 1，`PgUp` / `PgDn` 每次加减 10，到达范围边界时停住不越界。`accent` 用 `←` / `→` 在 UK / US 间切换。
+- **调整数值：** `←` / `→`（或 `-` / `+`）每次加减 1，`PgUp` / `PgDn` 每次加减 10，到达范围边界时停住不越界。`accent` 用 `←` / `→` 在 UK / US 间切换，`check_updates` 用 `←` / `→` 或 Enter 在 on / off 间切换。
 - **直接输入：** 选中数值项按 Enter 进入输入状态，只接受数字；再按 Enter 确认，`↑` / `↓` 移开则放弃输入。超出范围时底部提示允许范围，不保存。
 - **目标可达性提示：** `daily_goal` 超过"今天到期的复习词数 + 今天剩余的新词名额"时，在该项下方提示"按当前词库和 `daily_new_limit`，今天最多能练 N 个词"，但仍允许保存。
 - **恢复默认：** `r` 恢复当前项；`R` 恢复全部，需要再按 `y` 确认。
@@ -456,6 +471,7 @@ agent → 告诉用户：已加入 5 个词，会按每天 10 个新词的节奏
 | `unicode-width` | 终端中按显示宽度换行和对齐 |
 | `ctrlc` | Ctrl+C 处理，保证终端状态被恢复 |
 | `csv` | 导入导出 |
+| `semver` / `sha2` / `zip` / `tar` / `lzma-rs` | 软件更新：比较版本、校验下载、解压 `.zip` / `.tar.xz` |
 
 不引入 Web 框架、ORM、异步运行时或插件机制；`reqwest` 阻塞接口足以满足需求。MCP 服务器用 `serde_json` 手写，不新增依赖。发布使用 [dist](https://github.com/axodotdev/cargo-dist)。
 
@@ -482,6 +498,7 @@ stealthlingo/
 │   ├── config.rs
 │   ├── error.rs
 │   ├── time.rs
+│   ├── update.rs                # 检查新版本、下载校验并替换程序
 │   ├── bin/
 │   │   └── link-stealthlingo.rs # stealthlingo:// 链接的无窗口处理程序
 │   ├── commands/                # 每个子命令一个文件，另有 links.rs、io.rs（导入导出）
@@ -511,12 +528,13 @@ stealthlingo/
     ├── scheduling_tests.rs
     ├── storage_tests.rs
     ├── tui_tests.rs
+    ├── update_tests.rs
     └── fixtures/                # Wiktionary 响应样本
 ```
 
 ## 11. 本地数据模型
 
-数据目录下有 `stealthlingo.db`（SQLite）、`config.json`、`audio/`（下载的发音文件）和 `link-errors.log`。数据库使用版本化迁移，升级不会破坏学习进度。
+数据目录下有 `stealthlingo.db`（SQLite）、`config.json`、`audio/`（下载的发音文件）、`link-errors.log` 和 `update_check.json`（上次检查新版本的时间和结果）。数据库使用版本化迁移，升级不会破坏学习进度。
 
 ### `words`（词典缓存）
 
@@ -566,6 +584,7 @@ stealthlingo/
 - 查词失败时显示具体原因（查无此词、无法连接、超时、服务端错误），不 panic。
 - 学习、复习、`words`、`search`、`stats` 从不联网。
 - `lookup` 联网刷新，连不上时显示缓存副本；`add` 和 `audio` 优先用缓存，只在遇到新词时联网。
+- 每日的新版本检查只在全屏首页和 `lookup` 后于后台进行，失败不提示，也不影响任何操作；可用 `check_updates off` 关闭。`update` 连不上 GitHub 时提示检查网络，替换失败时不改动现有程序。
 - 发音数据未取全的条目照常可用，之后自动补全。
 - 音频首次播放时下载并缓存；下载或播放失败时提示原因，不影响答题。
 - 用户中途退出时，已经提交的答题保留；未提交答案不记为答错。`--plain` 下第二次 Ctrl+C 立即退出；全屏界面在非输入状态下按 Ctrl+C 直接退出，并恢复终端状态。
@@ -586,6 +605,7 @@ stealthlingo/
 | 7. 发布 | dist 构建五个平台的二进制，生成 shell / PowerShell 安装脚本 | 完成 |
 | 8. 日常使用增强 | 缺字母拼写、错词重练、混合模式、词库筛选、每日学习目标、全屏设置界面与 `config reset`、设置页导入导出 | 完成 |
 | 9. MCP 接入 | 抽出结构化的收藏函数、迁移 005（来源、移除记录、agent 收藏日志）、`stealthlingo mcp` 与 4 个工具、词库界面显示来源、README 配置说明 | 完成 |
+| 10. 软件更新 | 每日检查（`check_updates`）、标题栏提示、`update --check`、按安装记录原地替换并校验 sha256 | 完成 |
 
 ## 14. v0.1 发布清单
 

@@ -84,6 +84,12 @@ pub enum Command {
     Import { path: PathBuf },
     /// Serve AI agents over MCP on stdin/stdout (started by the agent's client)
     Mcp,
+    /// Install the latest release
+    Update {
+        /// Only report whether a newer release exists
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 #[derive(Debug, Clone, Default, clap::Args)]

@@ -44,6 +44,15 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/viys/stealthlingo/relea
 cargo install --git https://github.com/viys/stealthlingo
 ```
 
+アップデート：
+
+```bash
+stealthlingo update            # 最新リリースをインストール
+stealthlingo update --check    # 新しいリリースがあるかだけ表示
+```
+
+`update` は上のインストールスクリプトで入れたコピーを置き換えます。`cargo install` で入れたコピーの場合は、代わりに実行すべきコマンドを表示します。StealthLingo は 1 日 1 回（ホーム画面と `lookup` の後に）新しいリリースを確認し、あればヘッダーに `update X.Y.Z` を表示します。`stealthlingo config set check_updates off` でオフにできます。
+
 ## クイックスタート
 
 ```bash
@@ -75,6 +84,7 @@ Esc で開いたシェルでも、`lookup` や `add` などのコマンドは普
 | `export` / `import` | `.json` バックアップまたは `.csv` 単語リスト |
 | `mcp` | AI エージェント向け MCP サーバー |
 | `links` | クリック可能な lookup（Windows） |
+| `update [--check]` | 最新リリースをインストール（`--check` は表示のみ） |
 
 ```bash
 stealthlingo study --mode spelling --count 10

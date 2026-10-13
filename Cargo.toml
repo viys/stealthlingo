@@ -1,6 +1,6 @@
 [package]
 name = "stealthlingo"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 rust-version = "1.88"
 description = "A terminal-first language learning tool for stealthy study sessions."
@@ -18,15 +18,20 @@ clap = { version = "4", features = ["derive"] }
 csv = "1"
 ctrlc = "3"
 directories = "6"
+lzma-rs = "0.3"
 portable-pty = "0.9.0"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "std", "layout-cache"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rodio = { version = "0.20", default-features = false, features = ["symphonia-mp3", "vorbis", "wav", "flac"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
+semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.11"
+tar = { version = "0.4", default-features = false }
 thiserror = "2"
 unicode-width = "0.2"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 tempfile = "3"

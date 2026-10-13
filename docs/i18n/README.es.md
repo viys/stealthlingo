@@ -44,6 +44,15 @@ O desde el código fuente (Rust 1.88+; en Linux hace falta `libasound2-dev` para
 cargo install --git https://github.com/viys/stealthlingo
 ```
 
+Para actualizar:
+
+```bash
+stealthlingo update            # instala la última versión
+stealthlingo update --check    # solo indica si hay una nueva
+```
+
+`update` reemplaza las copias instaladas con los scripts de arriba; si la copia viene de `cargo install`, muestra el comando que debes ejecutar. Una vez al día StealthLingo busca una versión nueva (desde la pantalla de inicio y después de `lookup`) y muestra `update X.Y.Z` en la cabecera; `stealthlingo config set check_updates off` lo desactiva.
+
 ## Inicio rápido
 
 ```bash
@@ -75,6 +84,7 @@ Modos de práctica (`a`, o la letra directa): `s` tarjetas · `p` ortografía ·
 | `export` / `import` | Backup `.json` o lista `.csv` |
 | `mcp` | Servidor MCP para agentes de IA |
 | `links` | Lookups clicables (Windows) |
+| `update [--check]` | Instala la última versión (`--check` solo informa) |
 
 ```bash
 stealthlingo study --mode spelling --count 10

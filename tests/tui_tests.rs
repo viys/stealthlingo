@@ -113,6 +113,30 @@ fn home_explains_an_empty_word_list() {
 }
 
 #[test]
+fn a_newer_release_is_mentioned_quietly_in_the_header() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(&dir, false);
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    assert!(!screen(&mut app).contains("update"));
+
+    let newer: semver::Version = "99.0.0".parse().unwrap();
+    stealthlingo::update::remember(&ctx.paths, Utc::now(), Some(&newer)).unwrap();
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    let text = screen(&mut app);
+    assert!(
+        text.lines().next().unwrap().contains("update 99.0.0"),
+        "{text}"
+    );
+    let narrow = screen_sized(&mut app, 40, 12);
+    assert!(!narrow.contains("update"), "{narrow}");
+    assert!(narrow.contains("Esc hide"), "{narrow}");
+
+    ctx.config.check_updates = false;
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    assert!(!screen(&mut app).contains("update 99.0.0"));
+}
+
+#[test]
 fn menu_keys_keep_the_highlight_when_nothing_can_start() {
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = context(&dir, true);

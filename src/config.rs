@@ -49,6 +49,11 @@ impl Paths {
     pub fn audio_dir(&self) -> PathBuf {
         self.data_dir.join("audio")
     }
+
+    /// When the last update check ran and the newest release it saw.
+    pub fn update_check_file(&self) -> PathBuf {
+        self.data_dir.join("update_check.json")
+    }
 }
 
 /// Settings from `config.json`. Every key is described in [`SETTINGS`]; other
@@ -67,6 +72,8 @@ pub struct Config {
     pub accent: String,
     /// Words an agent may save through MCP per local day; 0 turns it off.
     pub mcp_daily_add_limit: u32,
+    /// Look for a new release at most once a day.
+    pub check_updates: bool,
 }
 
 impl Default for Config {
@@ -78,6 +85,7 @@ impl Default for Config {
             http_timeout_secs: 0,
             accent: String::new(),
             mcp_daily_add_limit: 0,
+            check_updates: false,
         };
         for setting in SETTINGS {
             setting.reset(&mut config);
@@ -117,6 +125,11 @@ pub enum Kind {
         put: fn(&mut Config, u64),
     },
     Accent,
+    Switch {
+        default: bool,
+        get: fn(&Config) -> bool,
+        put: fn(&mut Config, bool),
+    },
 }
 
 /// One user setting: its key in `config.json`, how it is shown and which
@@ -212,6 +225,17 @@ pub const SETTINGS: &[Setting] = &[
             put: |c, v| c.http_timeout_secs = v,
         },
     },
+    Setting {
+        key: "check_updates",
+        label: "Check for updates",
+        group: Group::Network,
+        help: "Look for a new release once a day, from the home screen and after lookup.",
+        kind: Kind::Switch {
+            default: true,
+            get: |c| c.check_updates,
+            put: |c, v| c.check_updates = v,
+        },
+    },
 ];
 
 /// The setting called `key`.
@@ -237,12 +261,29 @@ pub fn parse_accent(value: &str) -> Result<&'static str> {
     }
 }
 
+fn parse_switch(value: &str) -> Option<bool> {
+    match value.trim().to_lowercase().as_str() {
+        "on" | "true" | "yes" | "1" => Some(true),
+        "off" | "false" | "no" | "0" => Some(false),
+        _ => None,
+    }
+}
+
+fn switch_name(on: bool) -> &'static str {
+    if on {
+        "on"
+    } else {
+        "off"
+    }
+}
+
 impl Setting {
     /// The current value as shown to the user.
     pub fn value(&self, config: &Config) -> String {
         match self.kind {
             Kind::Number { get, .. } => get(config).to_string(),
             Kind::Accent => config.accent.clone(),
+            Kind::Switch { get, .. } => switch_name(get(config)).to_string(),
         }
     }
 
@@ -250,6 +291,7 @@ impl Setting {
         match self.kind {
             Kind::Number { default, .. } => default.to_string(),
             Kind::Accent => DEFAULT_ACCENT.to_string(),
+            Kind::Switch { default, .. } => switch_name(default).to_string(),
         }
     }
 
@@ -261,6 +303,7 @@ impl Setting {
                 None => format!("{min}–{max}"),
             },
             Kind::Accent => "UK / US".to_string(),
+            Kind::Switch { .. } => "on / off".to_string(),
         }
     }
 
@@ -272,6 +315,7 @@ impl Setting {
         match self.kind {
             Kind::Number { default, put, .. } => put(config, default),
             Kind::Accent => config.accent = DEFAULT_ACCENT.to_string(),
+            Kind::Switch { default, put, .. } => put(config, default),
         }
     }
 
@@ -300,6 +344,11 @@ impl Setting {
                 put(config, number);
             }
             Kind::Accent => config.accent = parse_accent(value)?.to_string(),
+            Kind::Switch { put, .. } => {
+                let on = parse_switch(value)
+                    .with_context(|| format!("{} must be on or off, got \"{value}\"", self.key))?;
+                put(config, on);
+            }
         }
         Ok(())
     }
@@ -318,6 +367,10 @@ impl Setting {
             }
             Kind::Accent => {
                 config.accent = if config.accent == "UK" { "US" } else { "UK" }.to_string();
+                true
+            }
+            Kind::Switch { get, put, .. } => {
+                put(config, !get(config));
                 true
             }
         }
@@ -371,6 +424,25 @@ impl Setting {
                     ))
                 }
             },
+            Kind::Switch { default, put, .. } => {
+                match value
+                    .as_bool()
+                    .or_else(|| value.as_str().and_then(parse_switch))
+                {
+                    Some(on) => {
+                        put(config, on);
+                        None
+                    }
+                    None => {
+                        put(config, default);
+                        Some(format!(
+                            "{} = {value} in config.json is not on or off; using {}",
+                            self.key,
+                            switch_name(default)
+                        ))
+                    }
+                }
+            }
         }
     }
 }
@@ -521,5 +593,27 @@ mod tests {
         config.reset("daily_goal").unwrap();
         config.reset("accent").unwrap();
         assert_eq!(config, Config::default());
+    }
+
+    #[test]
+    fn switches_accept_on_and_off() {
+        let mut config = Config::default();
+        assert!(config.check_updates);
+        config.set("check_updates", "OFF").unwrap();
+        assert!(!config.check_updates);
+        assert_eq!(setting("check_updates").unwrap().value(&config), "off");
+        assert!(config.set("check_updates", "sometimes").is_err());
+        assert!(setting("check_updates").unwrap().step(&mut config, 1));
+        assert!(config.check_updates);
+
+        let (config, warnings) = Config::from_json(r#"{"check_updates": false}"#).unwrap();
+        assert!(!config.check_updates);
+        assert!(warnings.is_empty());
+        let saved = serde_json::to_string(&config).unwrap();
+        assert!(saved.contains(r#""check_updates":false"#), "{saved}");
+
+        let (config, warnings) = Config::from_json(r#"{"check_updates": "maybe"}"#).unwrap();
+        assert!(config.check_updates);
+        assert!(warnings[0].contains("not on or off"), "{warnings:?}");
     }
 }
