@@ -205,9 +205,9 @@ impl View for Transfer {
             Phase::Confirm => vec![("y/l", "confirm"), ("any key", "cancel")],
             Phase::Edit => match self.kind {
                 Kind::Export { .. } => {
-                    vec![("Tab/←→", "format"), ("Enter", "export"), ("q", "back")]
+                    vec![("Tab", "format"), ("Enter", "export"), ("^C", "back")]
                 }
-                Kind::Import => vec![("Enter", "import"), ("q", "back")],
+                Kind::Import => vec![("Enter", "import"), ("^C", "back")],
             },
         }
     }
@@ -263,14 +263,9 @@ impl View for Transfer {
             return Ok(());
         }
 
+        // Letters and arrows belong to the path; Ctrl+C (`interrupt`) goes back.
         match key.code {
-            KeyCode::Char('q') => {
-                fx.go(Target::Settings);
-                return Ok(());
-            }
-            KeyCode::Tab | KeyCode::Left | KeyCode::Right
-                if matches!(self.kind, Kind::Export { .. }) =>
-            {
+            KeyCode::Tab if matches!(self.kind, Kind::Export { .. }) => {
                 self.toggle_format();
                 return Ok(());
             }

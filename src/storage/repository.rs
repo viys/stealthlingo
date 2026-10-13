@@ -149,9 +149,15 @@ pub struct Stats {
     pub new_words_today: i64,
     /// Different words answered today.
     pub words_today: i64,
-    pub total_attempts: i64,
-    pub total_correct: i64,
     pub next_due: Option<DateTime<Utc>>,
+}
+
+/// Every answer ever submitted. Not part of [`Stats`] because counting them
+/// reads the whole answer history, which the home screen does not need.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AnswerTotals {
+    pub attempts: i64,
+    pub correct: i64,
 }
 
 /// Escapes `%`, `_` and `\` for use inside a LIKE pattern with `ESCAPE '\'`.
@@ -648,10 +654,13 @@ impl Database {
 
     /// Number of words whose very first answer happened at or after `since`.
     pub fn count_new_started_since(&self, since: DateTime<Utc>) -> Result<i64> {
+        // Starts from the answers since `since` (date index), so the cost
+        // follows today's answers rather than the whole history.
         Ok(self.conn.query_row(
-            "SELECT COUNT(*) FROM
-                (SELECT MIN(created_at) AS first_at FROM practice_attempts GROUP BY word_id)
-             WHERE first_at >= ?1",
+            "SELECT COUNT(*) FROM words w
+             WHERE w.id IN (SELECT word_id FROM practice_attempts WHERE created_at >= ?1)
+               AND NOT EXISTS (SELECT 1 FROM practice_attempts p
+                               WHERE p.word_id = w.id AND p.created_at < ?1)",
             params![to_db(since)],
             |row| row.get(0),
         )?)
@@ -659,9 +668,11 @@ impl Database {
 
     /// Ids of the words with at least one submitted answer at or after `since`.
     pub fn words_practised_since(&self, since: DateTime<Utc>) -> Result<HashSet<i64>> {
+        // No DISTINCT: with it SQLite walks the word index over the whole
+        // history instead of the date index. The set removes duplicates.
         let mut stmt = self
             .conn
-            .prepare("SELECT DISTINCT word_id FROM practice_attempts WHERE created_at >= ?1")?;
+            .prepare("SELECT word_id FROM practice_attempts WHERE created_at >= ?1")?;
         let ids = stmt
             .query_map(params![to_db(since)], |row| row.get(0))?
             .collect::<rusqlite::Result<HashSet<i64>>>()?;
@@ -758,16 +769,25 @@ impl Database {
             })
             .collect();
 
-        let attempts = |since: Option<String>| -> Result<(i64, i64)> {
-            Ok(self.conn.query_row(
-                "SELECT COUNT(*), COALESCE(SUM(is_correct), 0) FROM practice_attempts
-                 WHERE ?1 IS NULL OR created_at >= ?1",
-                params![since],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?)
-        };
-        (stats.attempts_today, stats.correct_today) = attempts(Some(to_db(day_start)))?;
-        (stats.total_attempts, stats.total_correct) = attempts(None)?;
+        (stats.attempts_today, stats.correct_today) = self.conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(is_correct), 0) FROM practice_attempts
+             WHERE created_at >= ?1",
+            params![to_db(day_start)],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
         Ok(stats)
+    }
+
+    pub fn answer_totals(&self) -> Result<AnswerTotals> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(is_correct), 0) FROM practice_attempts",
+            [],
+            |row| {
+                Ok(AnswerTotals {
+                    attempts: row.get(0)?,
+                    correct: row.get(1)?,
+                })
+            },
+        )?)
     }
 }

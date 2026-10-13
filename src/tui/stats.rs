@@ -16,6 +16,7 @@ use crate::time::{describe_due, format_local, local_day_start};
 
 pub struct Stats {
     stats: storage::Stats,
+    totals: storage::AnswerTotals,
     daily_goal: u32,
     /// Different words answered on each of the last seven days.
     week: Vec<(DateTime<Utc>, i64)>,
@@ -30,6 +31,7 @@ impl Stats {
         let daily_goal = ctx.config.daily_goal;
         Ok(Self {
             stats: ctx.db.stats(now, local_day_start(now))?,
+            totals: ctx.db.answer_totals()?,
             daily_goal,
             week: if daily_goal > 0 {
                 recent_days(ctx, now, 7)?
@@ -126,8 +128,8 @@ impl View for Stats {
             "All time",
             format!(
                 "{} answers · {} correct",
-                s.total_attempts,
-                percent(s.total_correct, s.total_attempts)
+                self.totals.attempts,
+                percent(self.totals.correct, self.totals.attempts)
             ),
         ));
         if let Some(next) = s.next_due {
@@ -140,8 +142,8 @@ impl View for Stats {
                 ),
             ));
         }
-        let accuracy = if s.total_attempts > 0 {
-            s.total_correct as f64 / s.total_attempts as f64
+        let accuracy = if self.totals.attempts > 0 {
+            self.totals.correct as f64 / self.totals.attempts as f64
         } else {
             0.0
         };

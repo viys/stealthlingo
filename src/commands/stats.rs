@@ -50,6 +50,7 @@ pub fn week_line(days: &[(DateTime<Utc>, i64)], goal: u32) -> String {
 pub fn run(ctx: &Context) -> Result<()> {
     let now = Utc::now();
     let stats = ctx.db.stats(now, local_day_start(now))?;
+    let totals = ctx.db.answer_totals()?;
 
     let breakdown = stats
         .status_counts
@@ -79,8 +80,8 @@ pub fn run(ctx: &Context) -> Result<()> {
     }
     println!(
         "All time:     {} answers · {} correct",
-        stats.total_attempts,
-        percent(stats.total_correct, stats.total_attempts)
+        totals.attempts,
+        percent(totals.correct, totals.attempts)
     );
     if let Some(next) = stats.next_due {
         println!(

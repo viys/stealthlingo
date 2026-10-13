@@ -86,11 +86,7 @@ fn session(mode: StudyMode) -> Start {
 }
 
 fn answers(ctx: &Context) -> i64 {
-    let now = Utc::now();
-    ctx.db
-        .stats(now, now - chrono::Duration::days(1))
-        .unwrap()
-        .total_attempts
+    ctx.db.answer_totals().unwrap().attempts
 }
 
 #[test]
@@ -871,7 +867,10 @@ fn settings_export_and_import_json_round_trip() {
     );
     assert!(backup.is_file());
 
-    press(&mut app, &mut ctx, KeyCode::Char('q'));
+    app.handle_key(
+        &mut ctx,
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    );
     assert!(screen(&mut app).contains("Settings"));
 
     let other = tempfile::tempdir().unwrap();
@@ -959,6 +958,53 @@ fn settings_import_reports_missing_files_before_confirm() {
 }
 
 #[test]
+fn export_path_arrows_move_the_cursor() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    press(&mut app, &mut ctx, KeyCode::Char('c'));
+    press(&mut app, &mut ctx, KeyCode::Char('e'));
+    set_path(&mut app, &mut ctx, "ab.json");
+    press(&mut app, &mut ctx, KeyCode::Home);
+    press(&mut app, &mut ctx, KeyCode::Right);
+    type_text(&mut app, &mut ctx, "X");
+    press(&mut app, &mut ctx, KeyCode::Left);
+    let shown = screen(&mut app);
+    assert!(shown.contains("aXb.json"), "{shown}");
+    assert!(!shown.contains("CSV (word list)"), "{shown}");
+}
+
+#[test]
+fn settings_path_field_accepts_q_and_ctrl_c_goes_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(&dir, true);
+    let mut app = App::new(&mut ctx, Start::Home).unwrap();
+    press(&mut app, &mut ctx, KeyCode::Char('c'));
+    press(&mut app, &mut ctx, KeyCode::Char('i'));
+    type_text(&mut app, &mut ctx, "quiz.json");
+    assert!(
+        screen(&mut app).contains("quiz.json"),
+        "{}",
+        screen(&mut app)
+    );
+    press(&mut app, &mut ctx, KeyCode::Enter);
+    assert!(
+        app.flash_text()
+            .unwrap()
+            .contains("File not found: quiz.json"),
+        "{:?}",
+        app.flash_text()
+    );
+
+    app.handle_key(
+        &mut ctx,
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    );
+    assert!(!app.should_quit());
+    assert!(screen(&mut app).contains("Settings"));
+}
+
+#[test]
 fn settings_export_and_import_csv_word_list() {
     let dir = tempfile::tempdir().unwrap();
     let csv_path = dir.path().join("words.csv");
@@ -984,7 +1030,10 @@ fn settings_export_and_import_csv_word_list() {
     ctx.db.archive_from_collection("alpha", Utc::now()).unwrap();
     assert_eq!(ctx.db.collection_size().unwrap(), 1);
 
-    press(&mut app, &mut ctx, KeyCode::Char('q'));
+    app.handle_key(
+        &mut ctx,
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    );
     press(&mut app, &mut ctx, KeyCode::Char('i'));
     set_path(&mut app, &mut ctx, &csv);
     press(&mut app, &mut ctx, KeyCode::Enter);

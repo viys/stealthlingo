@@ -295,6 +295,51 @@ fn mistake_queue_puts_the_latest_mistakes_first() {
 }
 
 #[test]
+fn daily_counts_use_the_day_boundary_and_keep_removed_words() {
+    let mut db = Database::open_in_memory().unwrap();
+    let day_start = t0() - Duration::hours(2);
+    let ids: Vec<i64> = ["alpha", "bravo", "charlie", "delta", "echo"]
+        .iter()
+        .map(|w| save(&db, w, &raw_for(w), t0() - Duration::days(3)))
+        .collect();
+    // alpha: answered before today and again today, so not new today.
+    answer(&mut db, ids[0], Grade::Good, day_start - Duration::days(2));
+    answer(&mut db, ids[0], Grade::Good, t0());
+    // bravo: first answer exactly at the start of the day, answered twice.
+    answer(&mut db, ids[1], Grade::Again, day_start);
+    answer(&mut db, ids[1], Grade::Good, t0());
+    // charlie: only answered just before the day started.
+    answer(
+        &mut db,
+        ids[2],
+        Grade::Good,
+        day_start - Duration::seconds(1),
+    );
+    // delta: never answered. echo: first answered today, then removed.
+    answer(&mut db, ids[4], Grade::Good, t0());
+    assert!(db.remove_from_collection("echo", t0()).unwrap());
+
+    assert_eq!(db.count_new_started_since(day_start).unwrap(), 2);
+    let mut today: Vec<i64> = db
+        .words_practised_since(day_start)
+        .unwrap()
+        .into_iter()
+        .collect();
+    today.sort();
+    assert_eq!(today, vec![ids[0], ids[1], ids[4]]);
+
+    let stats = db.stats(t0(), day_start).unwrap();
+    assert_eq!(stats.attempts_today, 4);
+    assert_eq!(stats.correct_today, 3);
+    assert_eq!(stats.new_words_today, 2);
+    assert_eq!(stats.words_today, 3);
+    assert_eq!(stats.total_words, 4);
+    let totals = db.answer_totals().unwrap();
+    assert_eq!(totals.attempts, 6);
+    assert_eq!(totals.correct, 5);
+}
+
+#[test]
 fn attempts_are_recorded_and_counted_in_stats() {
     let mut db = Database::open_in_memory().unwrap();
     let hello = save(&db, "hello", HELLO, t0());
@@ -310,8 +355,9 @@ fn attempts_are_recorded_and_counted_in_stats() {
     assert_eq!(stats.total_words, 2);
     assert_eq!(stats.attempts_today, 2);
     assert_eq!(stats.correct_today, 1);
-    assert_eq!(stats.total_attempts, 3);
-    assert_eq!(stats.total_correct, 2);
+    let totals = db.answer_totals().unwrap();
+    assert_eq!(totals.attempts, 3);
+    assert_eq!(totals.correct, 2);
     assert_eq!(stats.new_words_today, 1);
     assert_eq!(stats.words_today, 2);
     assert_eq!(stats.due_now, 0);
@@ -465,7 +511,7 @@ fn backup_round_trip_and_idempotent_import() {
 
     let stats = target.stats(t0() + Duration::days(30), t0()).unwrap();
     assert_eq!(stats.total_words, 2);
-    assert_eq!(stats.total_attempts, 2);
+    assert_eq!(target.answer_totals().unwrap().attempts, 2);
 }
 
 #[test]
