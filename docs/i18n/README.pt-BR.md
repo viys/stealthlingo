@@ -4,7 +4,7 @@
 
 [![Release](https://img.shields.io/github/v/release/viys/stealthlingo)](https://github.com/viys/stealthlingo/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 
-Pratique algumas palavras em inglês enquanto você enrola. Pressione **Esc** e a tela volta a ser um terminal; pressione Esc de novo e você retorna. O timer pausa enquanto está oculta.
+Pratique algumas palavras em inglês enquanto você enrola. Pressione **Esc** e um shell abre neste terminal; pressione Esc de novo e você retorna. Esc não é digitado nesse shell. O timer pausa enquanto está oculta.
 
 Essa pausa é qualquer uma que você já tem: um build, uma reunião na qual você não está de verdade, a espera de uma resposta da IA. Procure uma palavra, salve e pratique com flashcards, soletração ou escuta. Os dados do dicionário vêm do [Wiktionary](https://en.wiktionary.org/) em inglês (sem chave de API). O progresso fica em SQLite local, então palavras salvas funcionam offline. Um servidor MCP opcional deixa um agente de código adicionar as palavras que notar; o StealthLingo nunca chama um modelo de IA.
 
@@ -19,7 +19,7 @@ Uma pausa da qual você sai na hora: uma sessão curta, Esc se alguém aparecer,
 | Você tem | Você não tem |
 |---|---|
 | TUI em tela cheia ou prompts `--plain` | Contas, sync na nuvem ou GUI |
-| Esc oculta a tela; o timer pausa enquanto está oculta | Ter que sair do app para tirá-lo da vista |
+| Esc oculta a tela e abre um shell; Esc volta. O timer pausa enquanto está oculta | Ter que sair do app para tirá-lo da vista |
 | Flashcards, soletração, letras faltando, escuta, misto, refazer erros | Definições escritas por IA |
 | Meta diária + repetição espaçada (SM-2 simplificado) | Cursos longos obrigatórios |
 | Áudio UK / US quando o Wiktionary tem | Rede obrigatória para revisar |

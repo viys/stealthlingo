@@ -1,11 +1,12 @@
 //! Full-screen interface: a home screen with today's numbers, study sessions
 //! with single-key answers, the word list, lookups and stats. Esc hides the
-//! interface instantly and brings it back.
+//! interface and leaves an interactive shell; Esc brings the interface back.
 
 mod audio;
 mod home;
 mod lookup;
 mod settings;
+mod shell;
 mod stats;
 mod study;
 mod theme;
@@ -13,12 +14,12 @@ mod transfer;
 mod widgets;
 mod words;
 
-use std::io::{self, IsTerminal};
+use std::io::{self, IsTerminal, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 use ratatui::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::crossterm::{cursor, execute};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -238,6 +239,14 @@ impl App {
     pub fn set_hidden(&mut self, hidden: bool) {
         self.hidden = hidden;
         self.screen.set_paused(hidden);
+    }
+
+    fn notify(&mut self, tone: Tone, text: impl Into<String>) {
+        let text: String = text.into();
+        self.flash = Some(Flash {
+            text: text.split_whitespace().collect::<Vec<_>>().join(" "),
+            tone,
+        });
     }
 
     /// The footer message, if any.
@@ -477,7 +486,29 @@ pub fn run(ctx: &mut Context, start: Start) -> Result<()> {
 }
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App, ctx: &mut Context) -> Result<()> {
+    let mut slot = shell::ShellSlot::new();
     while !app.should_quit() && !SIGNALLED.load(Ordering::SeqCst) {
+        match slot.poll() {
+            Some(Ok(())) => {
+                let (cols, rows) = term_size(terminal);
+                slot.resize(cols, rows);
+                if app.is_hidden() {
+                    slot.show(true);
+                }
+            }
+            Some(Err(err)) => {
+                if app.is_hidden() {
+                    show_app(terminal, app, &slot)?;
+                }
+                app.notify(Tone::Bad, format!("{err:#}"));
+            }
+            None => {}
+        }
+        // `exit` in the shell ends it. Come back rather than sit on a dead prompt.
+        if app.is_hidden() && slot.exited() {
+            show_app(terminal, app, &slot)?;
+            slot.clear();
+        }
         if !app.is_hidden() {
             terminal.draw(|frame| app.render(frame))?;
             if app.has_background_work() {
@@ -486,31 +517,92 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App, ctx: &mut Context) 
             }
         }
         if event::poll(Duration::from_millis(250))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Release {
-                    continue;
-                }
-                if key.code == KeyCode::Esc {
-                    if app.is_hidden() {
-                        execute!(io::stdout(), EnterAlternateScreen, cursor::Hide)?;
-                        terminal.clear()?;
-                        app.set_hidden(false);
-                    } else {
-                        // Back to the shell the app was started from.
-                        execute!(io::stdout(), LeaveAlternateScreen, cursor::Show)?;
-                        app.set_hidden(true);
-                    }
-                } else if app.is_hidden() {
-                    if widgets::is_ctrl(&key, 'c') {
-                        break;
-                    }
-                } else {
-                    app.handle_key(ctx, key);
-                }
+            match event::read()? {
+                Event::Key(key) => on_key(terminal, app, ctx, &mut slot, key)?,
+                Event::Resize(cols, rows) => slot.resize(cols, rows),
+                _ => {}
             }
         }
         app.tick();
     }
+    Ok(())
+}
+
+fn term_size(terminal: &DefaultTerminal) -> (u16, u16) {
+    terminal
+        .size()
+        .map(|size| (size.width.max(1), size.height.max(1)))
+        .unwrap_or((80, 24))
+}
+
+/// Leaves the interface on the main screen and shows the shell. The screen
+/// changes before the shell is started, so Esc hides immediately even when
+/// the shell takes a moment to print its prompt.
+fn hide_app(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    slot: &mut shell::ShellSlot,
+) -> Result<()> {
+    execute!(io::stdout(), LeaveAlternateScreen, cursor::Show)?;
+    app.set_hidden(true);
+    if slot.exited() {
+        slot.clear();
+    }
+    let (cols, rows) = term_size(terminal);
+    if slot.is_ready() {
+        slot.resize(cols, rows);
+        slot.show(true);
+        return Ok(());
+    }
+    if !slot.is_starting() {
+        // Raw mode does not move the cursor to column 0 on a bare line feed.
+        let _ = write!(io::stdout(), "\r\n");
+        let _ = io::stdout().flush();
+        if let Err(err) = slot.start(cols, rows) {
+            show_app(terminal, app, slot)?;
+            app.notify(Tone::Bad, format!("Could not start a shell: {err}"));
+        }
+    }
+    Ok(())
+}
+
+fn show_app(terminal: &mut DefaultTerminal, app: &mut App, slot: &shell::ShellSlot) -> Result<()> {
+    // Stop shell output before the alternate screen, so it is not drawn over the interface.
+    slot.show(false);
+    execute!(io::stdout(), EnterAlternateScreen, cursor::Hide)?;
+    terminal.clear()?;
+    app.set_hidden(false);
+    Ok(())
+}
+
+fn on_key(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    ctx: &mut Context,
+    slot: &mut shell::ShellSlot,
+    key: KeyEvent,
+) -> Result<()> {
+    if key.kind == KeyEventKind::Release {
+        return Ok(());
+    }
+    if shell::boss_key(&key) {
+        if app.is_hidden() {
+            show_app(terminal, app, slot)?;
+        } else {
+            hide_app(terminal, app, slot)?;
+        }
+        return Ok(());
+    }
+    if app.is_hidden() {
+        if let Some(bytes) = shell::shell_bytes(&key) {
+            if slot.send(&bytes).is_err() {
+                show_app(terminal, app, slot)?;
+                slot.clear();
+            }
+        }
+        return Ok(());
+    }
+    app.handle_key(ctx, key);
     Ok(())
 }
 

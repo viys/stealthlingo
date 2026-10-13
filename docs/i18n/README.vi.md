@@ -4,7 +4,7 @@
 
 [![Release](https://img.shields.io/github/v/release/viys/stealthlingo)](https://github.com/viys/stealthlingo/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 
-Luyện vài từ tiếng Anh trong lúc đang trốn việc. Nhấn **Esc** thì màn hình lại là terminal; nhấn Esc lần nữa là quay lại. Đồng hồ tạm dừng khi đang ẩn.
+Luyện vài từ tiếng Anh trong lúc đang trốn việc. Nhấn **Esc** thì terminal này mở một shell và gõ lệnh được; nhấn Esc lần nữa là quay lại. Esc không được gửi vào shell đó. Đồng hồ tạm dừng khi đang ẩn.
 
 Khoảng trống đó là bất cứ thứ bạn vốn đã có — một lần build, cuộc họp bạn không thực sự ngồi, hay lúc chờ AI trả lời. Tra một từ, lưu lại, rồi luyện flashcard, chính tả hoặc nghe vài phút. Dữ liệu từ điển lấy từ [Wiktionary](https://en.wiktionary.org/) tiếng Anh (không cần API key). Tiến độ lưu trong SQLite cục bộ, nên từ đã lưu vẫn luyện được offline. Máy chủ MCP tùy chọn để agent thêm những từ nó nhận ra; bản thân StealthLingo không bao giờ gọi mô hình AI.
 
@@ -19,7 +19,7 @@ Một khoảng trống bạn rời đi ngay được: một buổi ngắn, Esc k
 | Có | Không có |
 |---|---|
 | TUI toàn màn hình hoặc prompt `--plain` | Tài khoản, đồng bộ đám mây hay GUI |
-| Esc ẩn màn hình; đồng hồ tạm dừng khi đang ẩn | Phải thoát app mới giấu được màn hình |
+| Esc ẩn màn hình và mở shell; Esc để quay lại. Đồng hồ tạm dừng khi đang ẩn | Phải thoát app mới giấu được màn hình |
 | Flashcard, chính tả, chữ thiếu, nghe, hỗn hợp, luyện lại lỗi | Định nghĩa do AI viết |
 | Mục tiêu từ mỗi ngày + lặp cách quãng (SM-2 rút gọn) | Khóa học dài bắt buộc |
 | Âm thanh UK / US khi Wiktionary có | Mạng bắt buộc để ôn |

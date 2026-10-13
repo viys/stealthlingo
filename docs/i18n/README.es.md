@@ -4,7 +4,7 @@
 
 [![Release](https://img.shields.io/github/v/release/viys/stealthlingo)](https://github.com/viys/stealthlingo/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 
-Practica unas palabras de inglés mientras haces el vago. Pulsa **Esc** y la pantalla vuelve a ser una terminal; pulsa Esc otra vez y regresas. El temporizador se pausa mientras está oculta.
+Practica unas palabras de inglés mientras haces el vago. Pulsa **Esc** y aparece un shell en esta terminal; pulsa Esc otra vez y regresas. Esc no se escribe en ese shell. El temporizador se pausa mientras está oculta.
 
 Ese hueco es cualquiera que ya tengas: una compilación, una reunión a la que no estás prestando atención, la espera de una respuesta de la IA. Busca una palabra, guárdala y practica con tarjetas, ortografía o escucha. Los datos del diccionario vienen del [Wiktionary](https://en.wiktionary.org/) en inglés (sin clave de API). El progreso vive en SQLite local, así que las palabras guardadas funcionan sin conexión. Un servidor MCP opcional permite que un agente de código añada las palabras que note; StealthLingo nunca llama a un modelo de IA.
 
@@ -19,7 +19,7 @@ Un hueco del que puedes salir al momento: una sesión corta, Esc si alguien se a
 | Obtienes | No obtienes |
 |---|---|
 | TUI a pantalla completa o prompts `--plain` | Cuentas, sincronización en la nube ni GUI |
-| Esc oculta la pantalla; el temporizador se pausa | Tener que salir de la app para quitarla de la vista |
+| Esc oculta la pantalla y abre un shell; Esc vuelve. El temporizador se pausa | Tener que salir de la app para quitarla de la vista |
 | Tarjetas, ortografía, letras que faltan, escucha, mixto, reintentar errores | Definiciones escritas por IA |
 | Meta diaria + repetición espaciada (SM-2 simplificado) | Cursos largos obligatorios |
 | Audio UK / US cuando Wiktionary lo tiene | Red obligatoria para repasar |

@@ -4,7 +4,7 @@
 
 [![Release](https://img.shields.io/github/v/release/viys/stealthlingo)](https://github.com/viys/stealthlingo/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 
-摸魚的時候，背幾個英語單字。按 **Esc**，介面立刻變回終端機；再按一次又回來。隱藏期間計時暫停。
+摸魚的時候，背幾個英語單字。按 **Esc**，這個終端裡會打開一個 shell，可以打指令；再按一次 Esc 回來。Esc 不會送進這個 shell。隱藏期間計時暫停。
 
 這段空檔是你本來就有的任何一會兒——一次編譯、一場你並沒真正在開的會，或者 AI 還沒出結果。查一個詞、收藏它，用閃卡、拼寫或聽力練幾分鐘。詞典資料來自英文 [Wiktionary](https://en.wiktionary.org/)（無需 API 金鑰）。進度保存在本機 SQLite，已收藏的詞可離線練習。可選的 MCP 伺服器讓程式設計助手把注意到的詞加進列表——StealthLingo 本身從不呼叫 AI 模型。
 
@@ -19,7 +19,7 @@
 | 你會得到 | 你不會遇到 |
 |---|---|
 | 全螢幕 TUI 或 `--plain` 逐行提示 | 帳號、雲端同步或 GUI |
-| Esc 隱藏介面；隱藏期間計時暫停 | 得結束程式才能把螢幕讓出去 |
+| Esc 隱藏介面並打開 shell；再按 Esc 回來。隱藏期間計時暫停 | 得結束程式才能把螢幕讓出去 |
 | 閃卡、拼寫、缺字母、聽力、混合、錯詞重練 | AI 產生的釋義 |
 | 每日單字目標 + 間隔複習（簡化 SM-2） | 強制長課程 |
 | Wiktionary 有錄音時的 UK / US 音訊 | 複習必須連網 |

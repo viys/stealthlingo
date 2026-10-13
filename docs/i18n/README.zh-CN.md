@@ -4,7 +4,7 @@
 
 [![Release](https://img.shields.io/github/v/release/viys/stealthlingo)](https://github.com/viys/stealthlingo/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 
-摸鱼的时候，背几个英语单词。按 **Esc**，界面立刻变回终端；再按一次又回来。隐藏期间计时暂停。
+摸鱼的时候，背几个英语单词。按 **Esc**，当前终端里会打开一个 shell，可以打命令；再按一次 Esc 回来。Esc 不会送进这个 shell。隐藏期间计时暂停。
 
 这段空档是你本来就有的任何一会儿——一次编译、一场你并没真正在开的会，或者 AI 还没出结果。查一个词、收藏它，用闪卡、拼写或听力练几分钟。词典数据来自英文 [Wiktionary](https://en.wiktionary.org/)（无需 API 密钥）。进度保存在本地 SQLite，已收藏的词可离线练习。可选的 MCP 服务器让编程助手把注意到的词加进列表——StealthLingo 本身从不调用 AI 模型。
 
@@ -19,7 +19,7 @@
 | 你会得到 | 你不会遇到 |
 |---|---|
 | 全屏 TUI 或 `--plain` 逐行提示 | 账号、云同步或 GUI |
-| Esc 隐藏界面；隐藏期间计时暂停 | 得退出程序才能把屏幕让出去 |
+| Esc 隐藏界面并打开 shell；再按 Esc 回来。隐藏期间计时暂停 | 得退出程序才能把屏幕让出去 |
 | 闪卡、拼写、缺字母、听力、混合、错词重练 | AI 生成的释义 |
 | 每日单词目标 + 间隔复习（简化 SM-2） | 强制长课程 |
 | Wiktionary 有录音时的 UK / US 音频 | 复习必须联网 |

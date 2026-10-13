@@ -4,7 +4,7 @@
 
 [![Release](https://img.shields.io/github/v/release/viys/stealthlingo)](https://github.com/viys/stealthlingo/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Practise a few English words while you slack off. Press **Esc** and the screen is a terminal again; press Esc once more and you’re back. The timer pauses while it’s hidden.
+Practise a few English words while you slack off. Press **Esc** and you’re at a shell prompt in this terminal; press Esc once more and you’re back. Esc is not typed into that shell. The timer pauses while it’s hidden.
 
 That gap is whatever you already have — a build, a meeting you are not really in, the wait before an AI reply. Look a word up, save it, and practise with flashcards, spelling, or listening. Definitions come from English [Wiktionary](https://en.wiktionary.org/) (no API key). Progress lives in a local SQLite database, so saved words work offline. An optional MCP server lets a coding agent add words it notices; StealthLingo itself never calls an AI model.
 
@@ -19,7 +19,7 @@ A gap you can leave at once: a short session, Esc when someone walks by, and a l
 | You get | You don’t get |
 |---|---|
 | Full-screen TUI or `--plain` prompts | Accounts, cloud sync, or a GUI |
-| Esc hides the screen; the timer pauses while it is hidden | A window you have to quit to dismiss |
+| Esc hides the screen and opens a shell; Esc returns. The timer pauses while it is hidden | A window you have to quit to dismiss |
 | Flashcards, spelling, missing letters, listening, mixed, retry mistakes | AI-written definitions |
 | Daily word goal + spaced repetition (simplified SM-2) | Forced long courses |
 | UK / US audio when Wiktionary has it | Network required for review |
