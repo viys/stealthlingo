@@ -1,28 +1,47 @@
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use stealthlingo::cli::StudyMode;
-use stealthlingo::dictionary::{self, legacy, wiktionary, Entry};
+use stealthlingo::dictionary::{self, wiktionary, Definition, Entry, Meaning, Phonetic};
 use stealthlingo::learning::session::{build_mistake_queue, build_queue};
 use stealthlingo::learning::{schedule, Grade, PracticeMode, Status};
 use stealthlingo::storage::{AddOutcome, Database, NewAttempt, WordFilter};
-
-const HELLO: &str = include_str!("fixtures/hello.json");
-const SPARSE: &str = include_str!("fixtures/sparse.json");
 
 fn t0() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 3, 1, 8, 0, 0).unwrap()
 }
 
-fn raw_for(word: &str) -> String {
-    format!(
-        r#"[{{"word":"{word}","meanings":[{{"partOfSpeech":"noun","definitions":[{{"definition":"meaning of {word}"}}]}}]}}]"#
-    )
+/// A noun without pronunciations.
+fn entry_for(word: &str) -> Entry {
+    Entry {
+        word: word.to_string(),
+        meanings: vec![Meaning {
+            part_of_speech: Some("noun".to_string()),
+            definitions: vec![Definition {
+                definition: format!("meaning of {word}"),
+                example: None,
+            }],
+            ..Meaning::default()
+        }],
+        ..Entry::default()
+    }
+}
+
+/// The only test entry with audio.
+fn hello_entry() -> Entry {
+    Entry {
+        phonetic: Some("/həˈləʊ/".to_string()),
+        phonetics: vec![Phonetic {
+            text: Some("/həˈləʊ/".to_string()),
+            audio_url: Some("https://upload.wikimedia.org/En-uk-hello.ogg".to_string()),
+            accent: Some("UK".to_string()),
+        }],
+        ..entry_for("hello")
+    }
 }
 
 /// Caches and saves a word; returns its id.
-fn save(db: &Database, word: &str, raw: &str, now: DateTime<Utc>) -> i64 {
-    let entry: Entry = legacy::parse(word, raw).unwrap();
+fn save(db: &Database, word: &str, entry: &Entry, now: DateTime<Utc>) -> i64 {
     let id = db
-        .cache_word(word, &entry, raw, dictionary::SOURCE, now)
+        .cache_word(word, entry, "{}", dictionary::SOURCE, now)
         .unwrap();
     assert_eq!(
         db.add_to_collection(id, None, now).unwrap(),
@@ -73,7 +92,7 @@ fn migrations_run_once_and_persist_data() {
             db.schema_version().unwrap(),
             Database::latest_schema_version()
         );
-        save(&db, "hello", HELLO, t0());
+        save(&db, "hello", &hello_entry(), t0());
     }
     let db = Database::open(&path).unwrap();
     assert_eq!(
@@ -86,12 +105,12 @@ fn migrations_run_once_and_persist_data() {
 #[test]
 fn saving_is_idempotent_and_updates_notes() {
     let db = Database::open_in_memory().unwrap();
-    let entry = legacy::parse("hello", HELLO).unwrap();
+    let entry = hello_entry();
     let id = db
-        .cache_word("hello", &entry, HELLO, dictionary::SOURCE, t0())
+        .cache_word("hello", &entry, "{}", dictionary::SOURCE, t0())
         .unwrap();
     let again = db
-        .cache_word("hello", &entry, HELLO, dictionary::SOURCE, t0())
+        .cache_word("hello", &entry, "{}", dictionary::SOURCE, t0())
         .unwrap();
     assert_eq!(id, again);
 
@@ -119,7 +138,7 @@ fn saving_is_idempotent_and_updates_notes() {
 #[test]
 fn remove_keeps_cache_but_drops_from_list() {
     let db = Database::open_in_memory().unwrap();
-    save(&db, "hello", HELLO, t0());
+    save(&db, "hello", &hello_entry(), t0());
     assert!(db.remove_from_collection("hello", t0()).unwrap());
     assert!(!db.remove_from_collection("hello", t0()).unwrap());
     assert_eq!(db.collection_size().unwrap(), 0);
@@ -130,7 +149,7 @@ fn remove_keeps_cache_but_drops_from_list() {
 #[test]
 fn archived_words_come_back_with_their_progress() {
     let mut db = Database::open_in_memory().unwrap();
-    let id = save(&db, "hello", HELLO, t0());
+    let id = save(&db, "hello", &hello_entry(), t0());
     db.add_to_collection(id, Some("你好"), t0()).unwrap();
     answer(&mut db, id, Grade::Good, t0());
     answer(&mut db, id, Grade::Good, t0() + Duration::days(1));
@@ -176,10 +195,10 @@ fn archived_words_come_back_with_their_progress() {
 #[test]
 fn search_matches_words_and_notes_literally() {
     let db = Database::open_in_memory().unwrap();
-    save(&db, "hello", HELLO, t0());
-    let id = save(&db, "ephemeral", SPARSE, t0());
+    save(&db, "hello", &hello_entry(), t0());
+    let id = save(&db, "ephemeral", &entry_for("ephemeral"), t0());
     db.add_to_collection(id, Some("短暂的 100%"), t0()).unwrap();
-    save(&db, "ice_cream", &raw_for("ice_cream"), t0());
+    save(&db, "ice_cream", &entry_for("ice_cream"), t0());
 
     let names = |q: &str| -> Vec<String> {
         db.list_words(Some(q))
@@ -199,8 +218,13 @@ fn search_matches_words_and_notes_literally() {
 #[test]
 fn due_and_new_selection_follows_schedule() {
     let mut db = Database::open_in_memory().unwrap();
-    let hello = save(&db, "hello", HELLO, t0());
-    let ephemeral = save(&db, "ephemeral", SPARSE, t0() + Duration::seconds(1));
+    let hello = save(&db, "hello", &hello_entry(), t0());
+    let ephemeral = save(
+        &db,
+        "ephemeral",
+        &entry_for("ephemeral"),
+        t0() + Duration::seconds(1),
+    );
 
     assert!(db.due_items(t0(), false).unwrap().is_empty());
     let new: Vec<i64> = db
@@ -236,7 +260,7 @@ fn queue_respects_daily_new_limit_and_audio() {
     let ids: Vec<i64> = (0..5)
         .map(|i| {
             let word = format!("word{i}");
-            save(&db, &word, &raw_for(&word), t0() + Duration::seconds(i))
+            save(&db, &word, &entry_for(&word), t0() + Duration::seconds(i))
         })
         .collect();
     let day_start = t0() - Duration::hours(8);
@@ -265,7 +289,7 @@ fn mistake_queue_puts_the_latest_mistakes_first() {
     let ids: Vec<i64> = (0..4)
         .map(|i| {
             let word = format!("word{i}");
-            save(&db, &word, &raw_for(&word), t0())
+            save(&db, &word, &entry_for(&word), t0())
         })
         .collect();
     let old = t0() - Duration::days(40);
@@ -300,7 +324,7 @@ fn daily_counts_use_the_day_boundary_and_keep_removed_words() {
     let day_start = t0() - Duration::hours(2);
     let ids: Vec<i64> = ["alpha", "bravo", "charlie", "delta", "echo"]
         .iter()
-        .map(|w| save(&db, w, &raw_for(w), t0() - Duration::days(3)))
+        .map(|w| save(&db, w, &entry_for(w), t0() - Duration::days(3)))
         .collect();
     // alpha: answered before today and again today, so not new today.
     answer(&mut db, ids[0], Grade::Good, day_start - Duration::days(2));
@@ -342,8 +366,8 @@ fn daily_counts_use_the_day_boundary_and_keep_removed_words() {
 #[test]
 fn attempts_are_recorded_and_counted_in_stats() {
     let mut db = Database::open_in_memory().unwrap();
-    let hello = save(&db, "hello", HELLO, t0());
-    let ephemeral = save(&db, "ephemeral", SPARSE, t0());
+    let hello = save(&db, "hello", &hello_entry(), t0());
+    let ephemeral = save(&db, "ephemeral", &entry_for("ephemeral"), t0());
     let yesterday = t0() - Duration::days(1);
     answer(&mut db, hello, Grade::Good, yesterday);
     answer(&mut db, hello, Grade::Again, t0());
@@ -384,9 +408,10 @@ fn upgrading_to_word_origins_keeps_progress_and_dismisses_archived_words() {
         for (id, word) in [(1, "kept"), (2, "gone")] {
             conn.execute(
                 "INSERT INTO words (id, headword_normalized, display_word, raw_response_json,
-                                    source_fetched_at, created_at)
-                 VALUES (?1, ?2, ?2, ?3, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-                rusqlite::params![id, word, raw_for(word)],
+                                    source_fetched_at, created_at, source, entry_json)
+                 VALUES (?1, ?2, ?2, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z',
+                         'wiktionary', ?3)",
+                rusqlite::params![id, word, serde_json::to_string(&entry_for(word)).unwrap()],
             )
             .unwrap();
         }
@@ -425,10 +450,11 @@ fn upgrading_to_word_origins_keeps_progress_and_dismisses_archived_words() {
 #[test]
 fn word_filters_narrow_by_status_part_of_speech_and_due() {
     let mut db = Database::open_in_memory().unwrap();
-    let cat = save(&db, "cat", &raw_for("cat"), t0());
-    let run_raw = raw_for("run").replace("noun", "verb");
-    let run = save(&db, "run", &run_raw, t0());
-    save(&db, "dog", &raw_for("dog"), t0());
+    let cat = save(&db, "cat", &entry_for("cat"), t0());
+    let mut run_entry = entry_for("run");
+    run_entry.meanings[0].part_of_speech = Some("verb".to_string());
+    let run = save(&db, "run", &run_entry, t0());
+    save(&db, "dog", &entry_for("dog"), t0());
     answer(&mut db, cat, Grade::Again, t0());
     answer(&mut db, run, Grade::Good, t0() - Duration::days(1));
 
@@ -472,15 +498,14 @@ fn word_filters_narrow_by_status_part_of_speech_and_due() {
 #[test]
 fn backup_round_trip_and_idempotent_import() {
     let mut source = Database::open_in_memory().unwrap();
-    let hello = save(&source, "hello", HELLO, t0());
+    let hello = save(&source, "hello", &hello_entry(), t0());
     source.add_to_collection(hello, Some("你好"), t0()).unwrap();
-    save(&source, "ephemeral", SPARSE, t0());
-    let unsaved = legacy::parse("lookup", &raw_for("lookup")).unwrap();
+    save(&source, "ephemeral", &entry_for("ephemeral"), t0());
     source
         .cache_word(
             "lookup",
-            &unsaved,
-            &raw_for("lookup"),
+            &entry_for("lookup"),
+            "{}",
             dictionary::SOURCE,
             t0(),
         )
@@ -517,7 +542,7 @@ fn backup_round_trip_and_idempotent_import() {
 #[test]
 fn import_prefers_more_recent_progress() {
     let mut a = Database::open_in_memory().unwrap();
-    let id = save(&a, "hello", HELLO, t0());
+    let id = save(&a, "hello", &hello_entry(), t0());
     answer(&mut a, id, Grade::Good, t0());
     let older = a.export_backup(t0()).unwrap();
     answer(&mut a, id, Grade::Good, t0() + Duration::days(1));
@@ -539,7 +564,7 @@ fn import_rejects_foreign_or_invalid_backups() {
     assert!(db.import_backup(&backup).is_err());
 
     let mut source = Database::open_in_memory().unwrap();
-    let id = save(&source, "hello", HELLO, t0());
+    let id = save(&source, "hello", &hello_entry(), t0());
     answer(&mut source, id, Grade::Good, t0());
     let mut bad = source.export_backup(t0()).unwrap();
     bad.words[0].attempts[0].grade = "perfect".into();
@@ -561,7 +586,7 @@ fn schema_is_migrated_to_latest_version() {
 #[test]
 fn aliases_resolve_to_the_dictionary_headword() {
     let db = Database::open_in_memory().unwrap();
-    let run = save(&db, "run", &raw_for("run"), t0());
+    let run = save(&db, "run", &entry_for("run"), t0());
     db.add_alias("ran", run).unwrap();
     // Aliasing a word to its own headword is a no-op.
     db.add_alias("run", run).unwrap();
@@ -573,10 +598,8 @@ fn aliases_resolve_to_the_dictionary_headword() {
     assert_eq!(db.list_words(None).unwrap().len(), 1);
 
     // A real entry for the typed form wins over the alias.
-    let raw = raw_for("ran");
-    let entry = legacy::parse("ran", &raw).unwrap();
     let ran = db
-        .cache_word("ran", &entry, &raw, dictionary::SOURCE, t0())
+        .cache_word("ran", &entry_for("ran"), "{}", dictionary::SOURCE, t0())
         .unwrap();
     assert_eq!(db.find_cached("ran").unwrap().unwrap().id, ran);
     assert!(
@@ -585,7 +608,7 @@ fn aliases_resolve_to_the_dictionary_headword() {
     );
 
     let db = Database::open_in_memory().unwrap();
-    let run = save(&db, "run", &raw_for("run"), t0());
+    let run = save(&db, "run", &entry_for("run"), t0());
     db.add_alias("ran", run).unwrap();
     assert!(db.remove_from_collection("ran", t0()).unwrap());
     assert_eq!(db.collection_size().unwrap(), 0);
@@ -616,37 +639,4 @@ fn caches_wiktionary_entries() {
         target.find_cached("ephemeral").unwrap().unwrap().entry,
         entry
     );
-}
-
-fn version_1_backup() -> stealthlingo::storage::Backup {
-    let raw = serde_json::to_string(HELLO).unwrap();
-    let raw = raw.trim_matches('"');
-    let json = format!(
-        r#"{{"format":"stealthlingo-backup","version":1,"exported_at":"2026-03-01T08:00:00.000000Z",
-            "words":[{{"language_code":"en","headword":"hello","display_word":"hello",
-            "raw_response_json":"{raw}","has_audio":true,
-            "source_fetched_at":"2026-03-01T08:00:00.000000Z","created_at":"2026-03-01T08:00:00.000000Z"}}]}}"#
-    );
-    serde_json::from_str(&json).unwrap()
-}
-
-#[test]
-fn imports_version_1_backups_and_replaces_them_with_wiktionary_data() {
-    let mut db = Database::open_in_memory().unwrap();
-    let summary = db.import_backup(&version_1_backup()).unwrap();
-    assert_eq!(summary.words_added, 1);
-    let cached = db.find_cached("hello").unwrap().unwrap();
-    assert_eq!(cached.source, "free-dictionary");
-    assert!(cached.entry.has_audio());
-    db.add_to_collection(cached.id, Some("你好"), t0()).unwrap();
-
-    let raw = include_str!("fixtures/wiktionary_ephemeral.json");
-    let entry = wiktionary::parse_definitions("hello", raw).unwrap();
-    db.cache_word("hello", &entry, raw, dictionary::SOURCE, t0())
-        .unwrap();
-    let cached = db.find_cached("hello").unwrap().unwrap();
-    assert_eq!(cached.source, dictionary::SOURCE);
-    assert_eq!(cached.entry, entry);
-    assert!(cached.in_collection);
-    assert_eq!(cached.note.as_deref(), Some("你好"));
 }

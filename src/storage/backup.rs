@@ -7,22 +7,17 @@ use serde::{Deserialize, Serialize};
 
 use super::repository::VIA_AGENT;
 use super::Database;
-use crate::dictionary::decode_cached;
+use crate::dictionary::Entry;
 use crate::learning::{Grade, PracticeMode, Status};
 use crate::time::{from_db, to_db};
 
 pub const BACKUP_FORMAT: &str = "stealthlingo-backup";
-/// Version 2 added `source` and `entry_json`, version 3 who added a word and
-/// which words the user removed. Older files still import.
+/// Version 3 added who added a word and which words the user removed;
+/// version 2 files still import.
 pub const BACKUP_VERSION: u32 = 3;
 
 fn added_by_user() -> String {
     "user".to_string()
-}
-
-/// Version 1 backups only contain Free Dictionary responses.
-fn default_source() -> String {
-    "free-dictionary".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -42,11 +37,9 @@ pub struct BackupWord {
     pub has_audio: bool,
     pub source_fetched_at: String,
     pub created_at: String,
-    #[serde(default = "default_source")]
     pub source: String,
-    /// Normalized entry; absent in version 1 backups (Free Dictionary only).
-    #[serde(default)]
-    pub entry_json: Option<String>,
+    /// Normalized entry.
+    pub entry_json: String,
     /// Present only for words on the study list.
     #[serde(default)]
     pub progress: Option<BackupProgress>,
@@ -221,12 +214,8 @@ fn import_word(tx: &Transaction<'_>, word: &BackupWord, summary: &mut ImportSumm
     if source.is_empty() {
         bail!("missing dictionary source");
     }
-    decode_cached(
-        &word.display_word,
-        &word.raw_response_json,
-        word.entry_json.as_deref(),
-    )
-    .map_err(|e| anyhow::anyhow!("invalid dictionary data: {e}"))?;
+    serde_json::from_str::<Entry>(&word.entry_json)
+        .map_err(|e| anyhow::anyhow!("invalid dictionary data: {e}"))?;
     let fetched_at = canonical_ts(&word.source_fetched_at)?;
     let created_at = canonical_ts(&word.created_at)?;
 

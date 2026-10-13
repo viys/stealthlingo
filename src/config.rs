@@ -51,9 +51,8 @@ impl Paths {
     }
 }
 
-/// Settings from `config.json`. Every key is described in [`SETTINGS`]. Keys
-/// from older versions (such as `dictionary_source`) are ignored and dropped
-/// on the next save.
+/// Settings from `config.json`. Every key is described in [`SETTINGS`]; other
+/// keys are ignored and dropped on the next save.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Config {
     /// Different words to practise per local day; 0 turns the goal off.
@@ -215,22 +214,10 @@ pub const SETTINGS: &[Setting] = &[
     },
 ];
 
-/// Keys of settings that older versions had.
-const REMOVED_KEYS: &[&str] = &[
-    "dictionary_source",
-    "source",
-    "free_dictionary_url",
-    "api_base_url",
-    "merriam_webster_key",
-];
-
 /// The setting called `key`.
 pub fn setting(key: &str) -> Result<&'static Setting> {
     if let Some(setting) = SETTINGS.iter().find(|s| s.key == key) {
         return Ok(setting);
-    }
-    if REMOVED_KEYS.contains(&key) {
-        bail!("\"{key}\" is no longer a setting: StealthLingo now always uses Wiktionary");
     }
     bail!(
         "unknown config key \"{key}\"; valid keys: {}",
@@ -475,17 +462,13 @@ mod tests {
     }
 
     #[test]
-    fn ignores_settings_from_older_versions() {
-        let (config, warnings) = Config::from_json(
-            r#"{"daily_new_limit": 4, "dictionary_source": "merriam-webster",
-                "free_dictionary_url": "http://localhost:1/x", "merriam_webster_key": "k",
-                "api_base_url": "http://localhost:1/y"}"#,
-        )
-        .unwrap();
+    fn ignores_unknown_keys() {
+        let (config, warnings) =
+            Config::from_json(r#"{"daily_new_limit": 4, "colour": "blue"}"#).unwrap();
         assert!(warnings.is_empty());
         assert_eq!(config.daily_new_limit, 4);
         let saved = serde_json::to_string(&config).unwrap();
-        assert!(!saved.contains("dictionary"), "{saved}");
+        assert!(!saved.contains("colour"), "{saved}");
     }
 
     #[test]
@@ -521,10 +504,6 @@ mod tests {
         assert_eq!(config.accent, "US");
         config.set("accent", "British").unwrap();
         assert_eq!(config.accent, "UK");
-        let removed = config
-            .set("dictionary_source", "free-dictionary")
-            .unwrap_err();
-        assert!(removed.to_string().contains("Wiktionary"), "{removed}");
     }
 
     #[test]

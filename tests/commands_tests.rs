@@ -6,11 +6,25 @@ use stealthlingo::cli::ConfigAction;
 use stealthlingo::commands::links::{self, LinkAction};
 use stealthlingo::commands::{cached_or_fetch, config, fetch_word, Context, Freshness};
 use stealthlingo::config::{Config, Paths};
-use stealthlingo::dictionary::{self, legacy, wiktionary, Endpoints};
+use stealthlingo::dictionary::{self, wiktionary, Endpoints, Entry};
 use stealthlingo::storage::AddOutcome;
 
-const HELLO: &str = include_str!("fixtures/hello.json");
 const WIKT_REST: &str = include_str!("fixtures/wiktionary_ephemeral.json");
+
+/// Caches "ephemeral" as an entry still missing its pronunciation data.
+fn cache_partial(ctx: &Context) -> Entry {
+    let entry = wiktionary::parse_definitions("ephemeral", WIKT_REST).unwrap();
+    ctx.db
+        .cache_word(
+            "ephemeral",
+            &entry,
+            WIKT_REST,
+            dictionary::PARTIAL_SOURCE,
+            Utc::now(),
+        )
+        .unwrap();
+    entry
+}
 
 /// A context whose Wiktionary endpoints refuse connections, so any network
 /// request fails fast without leaving the machine.
@@ -45,27 +59,18 @@ fn cached_wiktionary_words_are_used_without_the_network() {
 }
 
 #[test]
-fn words_cached_by_older_versions_are_refreshed_but_kept_when_offline() {
+fn partial_entries_are_refreshed_but_kept_when_offline() {
     let dir = tempfile::tempdir().unwrap();
-    let mut ctx = offline_context(&dir);
-    let backup = format!(
-        r#"{{"format":"stealthlingo-backup","version":1,"exported_at":"2026-03-01T08:00:00.000000Z",
-            "words":[{{"language_code":"en","headword":"hello","display_word":"hello",
-            "raw_response_json":{raw},"has_audio":true,
-            "source_fetched_at":"2026-03-01T08:00:00.000000Z","created_at":"2026-03-01T08:00:00.000000Z"}}]}}"#,
-        raw = serde_json::to_string(HELLO).unwrap()
-    );
-    ctx.db
-        .import_backup(&serde_json::from_str(&backup).unwrap())
-        .unwrap();
+    let ctx = offline_context(&dir);
+    let entry = cache_partial(&ctx);
 
-    let (cached, freshness) = cached_or_fetch(&ctx, "hello").unwrap();
+    let (cached, freshness) = cached_or_fetch(&ctx, "ephemeral").unwrap();
     assert!(
         matches!(freshness, Freshness::Fallback(_)),
-        "an entry from another dictionary must trigger a Wiktionary refresh"
+        "a partial entry must trigger a Wiktionary refresh"
     );
-    assert_ne!(cached.source, dictionary::SOURCE);
-    assert_eq!(cached.entry, legacy::parse("hello", HELLO).unwrap());
+    assert_eq!(cached.source, dictionary::PARTIAL_SOURCE);
+    assert_eq!(cached.entry, entry);
 }
 
 #[test]
@@ -178,24 +183,15 @@ fn entries_fetched_without_pronunciations_are_refreshed_later() {
 }
 
 #[test]
-fn old_entries_missing_from_wiktionary_are_not_looked_up_again() {
+fn partial_entries_missing_from_wiktionary_are_not_looked_up_again() {
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = offline_context(&dir);
-    let backup = format!(
-        r#"{{"format":"stealthlingo-backup","version":1,"exported_at":"2026-03-01T08:00:00.000000Z",
-            "words":[{{"language_code":"en","headword":"hello","display_word":"hello",
-            "raw_response_json":{raw},"has_audio":true,
-            "source_fetched_at":"2026-03-01T08:00:00.000000Z","created_at":"2026-03-01T08:00:00.000000Z"}}]}}"#,
-        raw = serde_json::to_string(HELLO).unwrap()
-    );
-    ctx.db
-        .import_backup(&serde_json::from_str(&backup).unwrap())
-        .unwrap();
+    let entry = cache_partial(&ctx);
     use_server(&mut ctx, &serve(Vec::new()));
 
-    let (cached, _) = cached_or_fetch(&ctx, "hello").unwrap();
-    assert_eq!(cached.entry, legacy::parse("hello", HELLO).unwrap());
-    let cached = ctx.db.find_cached("hello").unwrap().unwrap();
+    let (cached, _) = cached_or_fetch(&ctx, "ephemeral").unwrap();
+    assert_eq!(cached.entry, entry);
+    let cached = ctx.db.find_cached("ephemeral").unwrap().unwrap();
     assert_eq!(cached.source, dictionary::SOURCE);
 }
 

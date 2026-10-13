@@ -5,75 +5,17 @@ use stealthlingo::commands::lookup::{
     next_steps, render_entry, render_entry_to_width, wrap, Detail,
 };
 use stealthlingo::dictionary::{
-    accent_from_audio_url, accent_name, clean_word, decode_cached, legacy, markup,
-    normalize_audio_url, normalize_headword, wiktionary, Definition, DictionaryClient, Endpoints,
-    Entry, Meaning, Phonetic,
+    accent_from_audio_url, accent_name, clean_word, markup, normalize_audio_url,
+    normalize_headword, wiktionary, Definition, DictionaryClient, Endpoints, Entry, Meaning,
+    Phonetic,
 };
 use stealthlingo::error::DictionaryError;
 
-/// Free Dictionary responses as cached by v0.1.
-const HELLO: &str = include_str!("fixtures/hello.json");
-const SPARSE: &str = include_str!("fixtures/sparse.json");
 const WIKT_REST: &str = include_str!("fixtures/wiktionary_ephemeral.json");
 const WIKT_PAGE: &str = include_str!("fixtures/wiktionary_ephemeral_wikitext.json");
 
 fn client() -> DictionaryClient {
     DictionaryClient::new(Endpoints::default(), Duration::from_secs(1)).unwrap()
-}
-
-// ---- Data cached by v0.1 (Free Dictionary responses) ----
-
-#[test]
-fn parses_full_entry_and_merges_homographs() {
-    let entry = legacy::parse("hello", HELLO).unwrap();
-    assert_eq!(entry.word, "hello");
-    assert_eq!(entry.phonetic.as_deref(), Some("/həˈləʊ/"));
-    // The duplicate phonetic from the second array element is merged away.
-    assert_eq!(entry.phonetics.len(), 2);
-    assert_eq!(
-        entry.audio_url(),
-        Some("https://ssl.gstatic.com/dictionary/static/sounds/20200429/hello--_gb_1.mp3")
-    );
-    assert_eq!(entry.phonetics[0].accent.as_deref(), Some("UK"));
-    assert_eq!(entry.phonetics[1].accent, None);
-    assert_eq!(entry.parts_of_speech(), vec!["exclamation", "noun", "verb"]);
-    assert_eq!(entry.first_example(), Some("hello there, Katie!"));
-    let noun = &entry.meanings[1];
-    assert_eq!(noun.synonyms, vec!["salutation"]);
-    assert_eq!(noun.antonyms, vec!["goodbye"]);
-    assert_eq!(
-        entry.source_urls,
-        vec!["https://en.wiktionary.org/wiki/hello"]
-    );
-    assert_eq!(entry.license.as_deref(), Some("CC BY-SA 3.0"));
-    assert_eq!(
-        entry.short_summary(),
-        "exclamation: used as a greeting or to begin a phone conversation."
-    );
-}
-
-#[test]
-fn tolerates_missing_and_blank_fields() {
-    let entry = legacy::parse("ephemeral", SPARSE).unwrap();
-    assert_eq!(entry.word, "ephemeral");
-    assert!(entry.phonetic.is_none());
-    assert!(entry.phonetics.is_empty());
-    assert!(!entry.has_audio());
-    assert_eq!(entry.meanings.len(), 1);
-    assert_eq!(entry.meanings[0].definitions.len(), 1);
-    assert!(entry.first_example().is_none());
-    assert!(entry.license.is_none());
-}
-
-#[test]
-fn entry_without_word_falls_back_to_request() {
-    let entry = legacy::parse(" Serendipity ", r#"[{"meanings": []}]"#).unwrap();
-    assert_eq!(entry.word, "Serendipity");
-    assert_eq!(entry.short_summary(), "(no definition available)");
-    assert!(matches!(
-        legacy::parse("x", "{not json").unwrap_err(),
-        DictionaryError::Parse(_)
-    ));
 }
 
 // ---- Wiktionary ----
@@ -274,18 +216,6 @@ fn unreachable_wiktionary_is_a_transient_error() {
         .fetch("hello")
         .unwrap_err();
     assert!(err.is_transient(), "{err}");
-}
-
-#[test]
-fn decodes_cached_entries_of_every_generation() {
-    // Rows from v0.1 only have the Free Dictionary response.
-    let legacy = decode_cached("hello", HELLO, None).unwrap();
-    assert_eq!(legacy.word, "hello");
-
-    let entry = wiktionary::parse_definitions("ephemeral", WIKT_REST).unwrap();
-    let json = serde_json::to_string(&entry).unwrap();
-    let decoded = decode_cached("ephemeral", WIKT_REST, Some(&json)).unwrap();
-    assert_eq!(decoded, entry);
 }
 
 #[test]

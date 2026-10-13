@@ -30,7 +30,7 @@ $env:STEALTHLINGO_HOME = "$env:TEMP\sl-dev"; cargo run -- stats
 |---|---|
 | `src/cli.rs` | clap 命令定义 |
 | `src/commands/` | 每个子命令一个文件；`mod.rs` 里的 `Context`、`fetch_word`、`cached_or_fetch` 是查词与缓存的入口 |
-| `src/dictionary/` | Wiktionary 客户端与解析，对外只暴露 `Entry` 模型；`legacy.rs` 只用于读旧缓存 |
+| `src/dictionary/` | Wiktionary 客户端与解析，对外只暴露 `Entry` 模型 |
 | `src/storage/` | SQLite 连接、版本化迁移（`database.rs`）、查询（`repository.rs`）、JSON 备份 |
 | `src/learning/` | 排程（纯函数 SM-2）、会话 `Session`、拼写判定 |
 | `src/audio/` | 发音下载缓存与播放（rodio） |

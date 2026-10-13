@@ -264,10 +264,10 @@ pub fn store_fetched(
 }
 
 /// Returns cached data when available and only goes to the network otherwise.
-/// Entries from a dictionary used by older versions, or cached without their
-/// pronunciation data, are refreshed from Wiktionary; the old copy is kept if
-/// that fails. When Wiktionary does not have the word at all, the old copy is
-/// marked as current so it is not looked up again every time.
+/// Entries cached without their pronunciation data are refreshed from
+/// Wiktionary; the old copy is kept if that fails. When Wiktionary no longer
+/// has the word at all, the old copy is marked as complete so it is not looked
+/// up again every time.
 pub fn cached_or_fetch(ctx: &Context, word: &str) -> Result<(CachedWord, Freshness)> {
     let headword = require_word(word)?;
     if let Some(cached) = ctx.db.find_cached(&headword)? {

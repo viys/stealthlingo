@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, OptionalExtension};
 
 use super::Database;
-use crate::dictionary::{decode_cached, Entry};
+use crate::dictionary::Entry;
 use crate::learning::{Grade, PracticeMode, ScheduleState, Status};
 use crate::time::{from_db, to_db};
 
@@ -17,9 +17,8 @@ pub struct CachedWord {
     pub id: i64,
     pub headword: String,
     pub entry: Entry,
-    /// Dictionary the entry came from; anything other than
-    /// [`crate::dictionary::SOURCE`] is refreshed when used (older dictionaries and
-    /// [`crate::dictionary::PARTIAL_SOURCE`]).
+    /// [`crate::dictionary::SOURCE`], or [`crate::dictionary::PARTIAL_SOURCE`]
+    /// for entries that are refreshed when used.
     pub source: String,
     pub fetched_at: DateTime<Utc>,
     pub in_collection: bool,
@@ -174,8 +173,8 @@ fn like_pattern(query: &str) -> String {
     escaped
 }
 
-fn parse_entry(display_word: &str, raw: &str, entry_json: Option<&str>) -> Result<Entry> {
-    decode_cached(display_word, raw, entry_json)
+fn parse_entry(display_word: &str, entry_json: &str) -> Result<Entry> {
+    serde_json::from_str(entry_json)
         .map_err(|e| anyhow!("cached dictionary data for \"{display_word}\" is corrupt: {e}"))
 }
 
@@ -194,7 +193,7 @@ fn parse_status(value: &str) -> Result<Status> {
 struct StudyRow {
     word_id: i64,
     display_word: String,
-    raw_json: String,
+    entry_json: String,
     note: Option<String>,
     status: String,
     repetitions: u32,
@@ -203,13 +202,10 @@ struct StudyRow {
     lapses: u32,
     due_at: String,
     last_reviewed_at: Option<String>,
-    entry_json: Option<String>,
 }
 
-const STUDY_SELECT: &str =
-    "SELECT w.id, w.display_word, w.raw_response_json, u.personal_note, u.status,
-        u.repetitions, u.interval_days, u.ease_factor, u.lapses, u.due_at, u.last_reviewed_at,
-        w.entry_json
+const STUDY_SELECT: &str = "SELECT w.id, w.display_word, w.entry_json, u.personal_note, u.status,
+        u.repetitions, u.interval_days, u.ease_factor, u.lapses, u.due_at, u.last_reviewed_at
     FROM user_words u JOIN words w ON w.id = u.word_id";
 
 impl StudyRow {
@@ -217,7 +213,7 @@ impl StudyRow {
         Ok(Self {
             word_id: row.get(0)?,
             display_word: row.get(1)?,
-            raw_json: row.get(2)?,
+            entry_json: row.get(2)?,
             note: row.get(3)?,
             status: row.get(4)?,
             repetitions: row.get(5)?,
@@ -226,18 +222,13 @@ impl StudyRow {
             lapses: row.get(8)?,
             due_at: row.get(9)?,
             last_reviewed_at: row.get(10)?,
-            entry_json: row.get(11)?,
         })
     }
 
     fn into_item(self) -> Result<StudyItem> {
         Ok(StudyItem {
             word_id: self.word_id,
-            entry: parse_entry(
-                &self.display_word,
-                &self.raw_json,
-                self.entry_json.as_deref(),
-            )?,
+            entry: parse_entry(&self.display_word, &self.entry_json)?,
             note: self.note,
             schedule: ScheduleState {
                 status: parse_status(&self.status)?,
@@ -338,9 +329,8 @@ impl Database {
         let row = self
             .conn
             .query_row(
-                "SELECT w.id, w.headword_normalized, w.display_word, w.raw_response_json,
-                        w.source_fetched_at, u.word_id IS NOT NULL, u.personal_note,
-                        w.source, w.entry_json
+                "SELECT w.id, w.headword_normalized, w.display_word, w.entry_json,
+                        w.source_fetched_at, u.word_id IS NOT NULL, u.personal_note, w.source
                  FROM words w LEFT JOIN user_words u ON u.word_id = w.id
                  WHERE w.id = ?1",
                 params![word_id],
@@ -356,17 +346,16 @@ impl Database {
                         row.get::<_, bool>(5)?,
                         row.get::<_, Option<String>>(6)?,
                         row.get::<_, String>(7)?,
-                        row.get::<_, Option<String>>(8)?,
                     ))
                 },
             )
             .optional()?;
         row.map(
-            |((id, headword, display, raw), fetched, in_collection, note, source, entry_json)| {
+            |((id, headword, display, entry_json), fetched, in_collection, note, source)| {
                 Ok(CachedWord {
                     id,
                     headword,
-                    entry: parse_entry(&display, &raw, entry_json.as_deref())?,
+                    entry: parse_entry(&display, &entry_json)?,
                     source,
                     fetched_at: from_db(&fetched)?,
                     in_collection,
@@ -547,8 +536,8 @@ impl Database {
             .filter(|q| !q.is_empty())
             .map(|q| like_pattern(&q));
         let mut stmt = self.conn.prepare(
-            "SELECT w.id, w.display_word, w.raw_response_json, w.has_audio, u.status, u.due_at,
-                    u.personal_note, u.repetitions, u.interval_days, w.entry_json, u.lapses,
+            "SELECT w.id, w.display_word, w.entry_json, w.has_audio, u.status, u.due_at,
+                    u.personal_note, u.repetitions, u.interval_days, u.lapses,
                     u.added_via, u.added_reason
              FROM user_words u JOIN words w ON w.id = u.word_id
              WHERE ?1 IS NULL
@@ -560,8 +549,8 @@ impl Database {
         // with rusqlite errors.
         let rows = stmt
             .query_map(params![pattern], |row| {
-                let (raw, entry_json, status, due): (String, Option<String>, String, String) =
-                    (row.get(2)?, row.get(9)?, row.get(4)?, row.get(5)?);
+                let (entry_json, status, due): (String, String, String) =
+                    (row.get(2)?, row.get(4)?, row.get(5)?);
                 let summary = WordSummary {
                     word_id: row.get(0)?,
                     display_word: row.get(1)?,
@@ -573,16 +562,16 @@ impl Database {
                     has_audio: row.get(3)?,
                     repetitions: row.get(7)?,
                     interval_days: row.get(8)?,
-                    lapses: row.get(10)?,
-                    added_by_agent: row.get::<_, String>(11)? == VIA_AGENT,
-                    added_reason: row.get(12)?,
+                    lapses: row.get(9)?,
+                    added_by_agent: row.get::<_, String>(10)? == VIA_AGENT,
+                    added_reason: row.get(11)?,
                 };
-                Ok((summary, raw, entry_json, status, due))
+                Ok((summary, entry_json, status, due))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         rows.into_iter()
-            .map(|(mut word, raw, entry_json, status, due)| {
-                let entry = parse_entry(&word.display_word, &raw, entry_json.as_deref())?;
+            .map(|(mut word, entry_json, status, due)| {
+                let entry = parse_entry(&word.display_word, &entry_json)?;
                 word.summary = entry.short_summary();
                 word.parts_of_speech = entry
                     .parts_of_speech()

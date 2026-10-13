@@ -128,12 +128,6 @@ pub fn accent_from_audio_url(url: &str) -> Option<&'static str> {
         .and_then(|t| accent_name(&t))
 }
 
-pub(crate) fn non_blank(value: Option<String>) -> Option<String> {
-    value
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
 pub(crate) fn push_unique(target: &mut Vec<String>, items: impl IntoIterator<Item = String>) {
     for item in items {
         let item = item.trim().to_string();

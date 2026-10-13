@@ -4,7 +4,7 @@
 >
 > **核心理念：** 打开终端，几秒进入练习；每轮只花 3–5 分钟；按一下 Esc 就能藏起来；本地保留学习进度；不用网络也能复习已经缓存的词。
 
-> **当前状态（v0.1.6）：** P0 和 P1 全部完成，并已加入全屏 TUI、老板键、英美音选择、可点击查词结果（Windows）、全屏设置界面、供 AI agent 推荐单词的 MCP 服务器和预编译二进制发布。早期版本使用的 Free Dictionary API 已经弃用，只保留读取旧缓存的兼容代码。
+> **当前状态（v0.1.6）：** P0 和 P1 全部完成，并已加入全屏 TUI、老板键、英美音选择、可点击查词结果（Windows）、全屏设置界面、供 AI agent 推荐单词的 MCP 服务器和预编译二进制发布。开发阶段使用过的 Free Dictionary API 已经弃用，相关兼容代码已全部移除。
 
 ## 1. 产品原则
 
@@ -167,7 +167,7 @@ Commands:
 | `accent` | `UK` | `uk` / `us` | 默认播放的口音 |
 | `mcp_daily_add_limit` | 30 | 0–200，0 表示禁止 agent 收藏 | 每天最多允许 agent 通过 MCP 新收藏的单词数 |
 
-旧版本的 `dictionary_source`、`free_dictionary_url`、`merriam_webster_key` 等配置项已移除：读取时忽略，下次保存时丢弃；尝试 `config set` 会提示“现在始终使用 Wiktionary”。
+`config.json` 中不在上表的键读取时忽略，下次保存时丢弃；`config set` 遇到未知键会报错并列出可用的键。
 
 #### 用户如何设置
 
@@ -260,12 +260,9 @@ https://commons.wikimedia.org/wiki/Special:FilePath/{file}
 9. 不假设 Wiktionary 能提供中文翻译、学习进度、等级体系、可靠的词频排名或句子音频。
 10. 遵守 Wikimedia 的使用条款。Wiktionary 内容以 CC BY-SA 4.0 授权，每个条目保存来源 URL 和许可证，`lookup --all` 会显示；不批量再分发缓存数据。
 
-### 旧数据兼容
+### 早期词典源
 
-v0.1 早期版本把 Free Dictionary API 的原始响应存进数据库，中间版本还支持过 Merriam-Webster。现在：
-
-- 不再访问这些服务；`dictionary::legacy` 只负责解码旧缓存行和第 1 版 JSON 备份。
-- 旧缓存可以离线阅读和学习，下次 `lookup` 时被 Wiktionary 数据替换，学习进度和笔记保留。
+开发阶段曾使用 Free Dictionary API，也短暂支持过 Merriam-Webster。这些版本没有用户，因此没有保留任何兼容代码：不解码它们的缓存，不导入第 1 版 JSON 备份（缺少 `source` 和 `entry_json`），也不识别它们的配置项。
 
 ### 中文提示的处理
 
@@ -492,8 +489,7 @@ stealthlingo/
 │   │   ├── client.rs            # HTTP 请求、超时预算、大小写回退
 │   │   ├── wiktionary.rs        # REST 定义解析 + wikitext 解析
 │   │   ├── markup.rs            # HTML 转纯文本
-│   │   ├── models.rs            # Entry / Meaning / Phonetic
-│   │   └── legacy.rs            # 旧版 Free Dictionary 缓存解码
+│   │   └── models.rs            # Entry / Meaning / Phonetic
 │   ├── learning/
 │   │   ├── scheduling.rs
 │   │   ├── session.rs
@@ -515,7 +511,7 @@ stealthlingo/
     ├── scheduling_tests.rs
     ├── storage_tests.rs
     ├── tui_tests.rs
-    └── fixtures/                # Wiktionary 响应样本，以及旧版 Free Dictionary 样本
+    └── fixtures/                # Wiktionary 响应样本
 ```
 
 ## 11. 本地数据模型
@@ -526,8 +522,8 @@ stealthlingo/
 
 - `id`、`language_code`（目前只有 `en`）、`headword_normalized`、`display_word`
 - `raw_response_json`：原始响应
-- `entry_json`：规范化后的 `Entry`；为空表示 v0.1 的 Free Dictionary 旧数据
-- `source`：`wiktionary`、`wiktionary-partial`，或旧数据的 `free-dictionary` 等
+- `entry_json`：规范化后的 `Entry`，所有内容都从这里读取
+- `source`：`wiktionary`，或发音数据未取全的 `wiktionary-partial`（使用时会刷新）
 - `has_audio`、`source_fetched_at`、`created_at`
 
 ### `word_aliases`
