@@ -2,7 +2,7 @@
 
 [English](../../README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Español](README.es.md) | **Português (Brasil)** | [Русский](README.ru.md) | [Tiếng Việt](README.vi.md)
 
-[![Release](https://img.shields.io/github/v/release/viys/stealthlingo)](https://github.com/viys/stealthlingo/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+[![Release](https://img.shields.io/github/v/release/viys/stealthlingo)](https://github.com/viys/stealthlingo/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE) [![M8ven Score](https://m8ven.ai/badge/mcp/viys-stealthlingo-17ubze?v=b87b5893849d721e2b3074b76e72c0c2)](https://m8ven.ai/mcp/viys-stealthlingo-17ubze?s=readme)
 
 Pratique algumas palavras em inglês enquanto você enrola. Pressione **Esc** e um shell abre neste terminal; pressione Esc de novo e você retorna. Esc não é digitado nesse shell. O timer pausa enquanto está oculta.
 

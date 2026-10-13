@@ -2,7 +2,7 @@
 
 **English** | [简体中文](docs/i18n/README.zh-CN.md) | [繁體中文](docs/i18n/README.zh-TW.md) | [日本語](docs/i18n/README.ja.md) | [한국어](docs/i18n/README.ko.md) | [Español](docs/i18n/README.es.md) | [Português (Brasil)](docs/i18n/README.pt-BR.md) | [Русский](docs/i18n/README.ru.md) | [Tiếng Việt](docs/i18n/README.vi.md)
 
-[![Release](https://img.shields.io/github/v/release/viys/stealthlingo)](https://github.com/viys/stealthlingo/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/viys/stealthlingo)](https://github.com/viys/stealthlingo/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![M8ven Score](https://m8ven.ai/badge/mcp/viys-stealthlingo-17ubze?v=b87b5893849d721e2b3074b76e72c0c2)](https://m8ven.ai/mcp/viys-stealthlingo-17ubze?s=readme)
 
 Practise a few English words while you slack off. Press **Esc** and you’re at a shell prompt in this terminal; press Esc once more and you’re back. Esc is not typed into that shell. The timer pauses while it’s hidden.
 
