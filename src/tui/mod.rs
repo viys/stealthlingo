@@ -14,9 +14,9 @@ mod transfer;
 mod widgets;
 mod words;
 
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ratatui::crossterm::event::{self, Event, KeyEvent, KeyEventKind};
@@ -43,6 +43,8 @@ pub enum Start {
 pub fn available() -> bool {
     io::stdin().is_terminal() && io::stdout().is_terminal()
 }
+
+pub use shell::inside_esc_shell;
 
 #[derive(Debug, Clone)]
 enum Target {
@@ -480,13 +482,25 @@ impl Drop for Restore {
 
 pub fn run(ctx: &mut Context, start: Start) -> Result<()> {
     let mut app = App::new(ctx, start)?;
+    let origin = shell::main_screen_origin();
     let mut terminal = ratatui::try_init()?;
     let _restore = Restore::new();
-    event_loop(&mut terminal, &mut app, ctx)
+    event_loop(&mut terminal, &mut app, ctx, origin)
 }
 
-fn event_loop(terminal: &mut DefaultTerminal, app: &mut App, ctx: &mut Context) -> Result<()> {
+/// How long the interface is on screen before the Esc shell starts in the
+/// background, so starting a shell does not compete with opening the app.
+const SHELL_PRELOAD_DELAY: Duration = Duration::from_secs(1);
+
+fn event_loop(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    ctx: &mut Context,
+    origin: Option<u16>,
+) -> Result<()> {
     let mut slot = shell::ShellSlot::new();
+    slot.set_origin(origin);
+    let opened = Instant::now();
     while !app.should_quit() && !SIGNALLED.load(Ordering::SeqCst) {
         match slot.poll() {
             Some(Ok(())) => {
@@ -496,24 +510,33 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App, ctx: &mut Context) 
                     slot.show(true);
                 }
             }
+            // A background start that fails stays quiet until Esc tries again.
             Some(Err(err)) => {
                 if app.is_hidden() {
-                    show_app(terminal, app, &slot)?;
+                    show_app(terminal, app, &mut slot)?;
+                    app.notify(Tone::Bad, format!("{err:#}"));
                 }
-                app.notify(Tone::Bad, format!("{err:#}"));
             }
             None => {}
         }
-        // `exit` in the shell ends it. Come back rather than sit on a dead prompt.
-        if app.is_hidden() && slot.exited() {
-            show_app(terminal, app, &slot)?;
-            slot.clear();
+        if slot.exited() {
+            if app.is_hidden() {
+                // `exit` in the shell ends it. Come back rather than sit on a dead prompt.
+                show_app(terminal, app, &mut slot)?;
+                slot.clear();
+            } else {
+                slot.discard();
+            }
         }
         if !app.is_hidden() {
             terminal.draw(|frame| app.render(frame))?;
             if app.has_background_work() {
                 app.background_work(ctx);
                 continue;
+            }
+            if opened.elapsed() >= SHELL_PRELOAD_DELAY {
+                let (cols, rows) = term_size(terminal);
+                slot.preload(cols, rows);
             }
         }
         if event::poll(Duration::from_millis(250))? {
@@ -535,9 +558,9 @@ fn term_size(terminal: &DefaultTerminal) -> (u16, u16) {
         .unwrap_or((80, 24))
 }
 
-/// Leaves the interface on the main screen and shows the shell. The screen
-/// changes before the shell is started, so Esc hides immediately even when
-/// the shell takes a moment to print its prompt.
+/// Leaves the interface on the main screen and shows the shell. The shell is
+/// normally already running in the background; if it is still starting, the
+/// screen changes anyway and the prompt appears once it is ready.
 fn hide_app(
     terminal: &mut DefaultTerminal,
     app: &mut App,
@@ -555,9 +578,6 @@ fn hide_app(
         return Ok(());
     }
     if !slot.is_starting() {
-        // Raw mode does not move the cursor to column 0 on a bare line feed.
-        let _ = write!(io::stdout(), "\r\n");
-        let _ = io::stdout().flush();
         if let Err(err) = slot.start(cols, rows) {
             show_app(terminal, app, slot)?;
             app.notify(Tone::Bad, format!("Could not start a shell: {err}"));
@@ -566,9 +586,14 @@ fn hide_app(
     Ok(())
 }
 
-fn show_app(terminal: &mut DefaultTerminal, app: &mut App, slot: &shell::ShellSlot) -> Result<()> {
+fn show_app(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    slot: &mut shell::ShellSlot,
+) -> Result<()> {
     // Stop shell output before the alternate screen, so it is not drawn over the interface.
     slot.show(false);
+    slot.set_origin(shell::main_screen_origin());
     execute!(io::stdout(), EnterAlternateScreen, cursor::Hide)?;
     terminal.clear()?;
     app.set_hidden(false);

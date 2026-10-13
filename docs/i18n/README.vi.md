@@ -56,6 +56,8 @@ stealthlingo --plain                   # prompt từng dòng
 
 Trang chủ: `r` ôn · `a` luyện · `/` tra từ · `w` danh sách · `t` thống kê · `c` cài đặt · **Esc** ẩn · **Ctrl+C** thoát (`q` chỉ quay lại).
 
+Trong shell mà Esc mở ra, các lệnh như `lookup` và `add` vẫn dùng bình thường. Ứng dụng toàn màn hình đã mở sẵn, nên chạy lại nó ở đó chỉ nhắc bạn nhấn Esc để quay về.
+
 Chế độ luyện (`a`, hoặc bấm thẳng chữ cái): `s` flashcard · `p` chính tả · `m` chữ thiếu · `i` nghe · `x` hỗn hợp · `e` luyện lại lỗi.
 
 ## Lệnh

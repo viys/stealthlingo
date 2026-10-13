@@ -93,13 +93,16 @@ impl Context {
 
 pub fn run(cli: Cli) -> Result<()> {
     crate::learning::session::install_interrupt_handler();
-    let mut ctx = Context::load()?;
     let full_screen = !cli.plain && tui::available();
     let opens_tui = full_screen
         && matches!(
             cli.command,
             None | Some(Command::Study(_)) | Some(Command::Review { .. })
         );
+    if opens_tui {
+        refuse_nested(tui::inside_esc_shell())?;
+    }
+    let mut ctx = Context::load()?;
     if !opens_tui {
         for warning in &ctx.config_warnings {
             eprintln!("Warning: {warning}");
@@ -145,6 +148,18 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Command::Import { path }) => io::import_cmd(&mut ctx, &path),
         Some(Command::Mcp) => crate::mcp::run(&mut ctx),
     }
+}
+
+/// `nested` is true in the shell that Esc opened, where the full-screen app is
+/// already open.
+fn refuse_nested(nested: bool) -> Result<()> {
+    if nested {
+        bail!(
+            "StealthLingo is already open in this terminal; press Esc to return to it. \
+             Commands such as `lookup` and `add` work here, and `--plain` practises line by line."
+        );
+    }
+    Ok(())
 }
 
 /// `stealthlingo` with no command: review if anything is due, otherwise study,
@@ -287,5 +302,17 @@ fn percent(part: i64, whole: i64) -> String {
         "-".to_string()
     } else {
         format!("{:.0}%", part as f64 * 100.0 / whole as f64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::refuse_nested;
+
+    #[test]
+    fn full_screen_is_refused_inside_the_esc_shell() {
+        let err = refuse_nested(true).unwrap_err().to_string();
+        assert!(err.contains("press Esc to return"), "{err}");
+        assert!(refuse_nested(false).is_ok());
     }
 }

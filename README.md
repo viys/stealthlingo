@@ -56,6 +56,8 @@ stealthlingo --plain                   # line-by-line prompts instead
 
 On the home screen: `r` review · `a` practice · `/` look up · `w` word list · `t` stats · `c` settings · **Esc** hide · **Ctrl+C** quit (`q` only goes back).
 
+In the shell that Esc opens, commands such as `lookup` and `add` work as usual. The full-screen app is already open, so starting it again there only reminds you to press Esc.
+
 Practice modes (`a`, or jump in with the letter): `s` flashcards · `p` spelling · `m` missing letters · `i` listening · `x` mixed · `e` retry mistakes.
 
 ## Commands

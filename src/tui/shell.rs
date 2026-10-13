@@ -18,6 +18,76 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use unicode_width::UnicodeWidthChar;
 
+/// Set in the shell that Esc opens: the PID of the StealthLingo that owns it,
+/// followed on Unix by `:` and the pty's terminal device. Windows, editors and
+/// daemons started from that shell inherit it, so it only counts while that
+/// StealthLingo runs and this process is on its terminal.
+const SHELL_ENV: &str = "STEALTHLINGO_SHELL";
+
+/// Whether this process runs in the terminal of an Esc shell. That shell never
+/// receives Esc, so a full-screen StealthLingo started there could not hide.
+pub fn inside_esc_shell() -> bool {
+    let Some(marker) = env::var_os(SHELL_ENV) else {
+        return false;
+    };
+    #[cfg(windows)]
+    {
+        marker
+            .to_str()
+            .and_then(|pid| pid.parse().ok())
+            .is_some_and(win32::console_belongs_to)
+    }
+    #[cfg(unix)]
+    {
+        let Some((owner, tty)) = marker.to_str().and_then(|value| value.split_once(':')) else {
+            return false;
+        };
+        let Ok(owner) = owner.parse::<i32>() else {
+            return false;
+        };
+        // SAFETY: signal 0 only checks that the process exists.
+        owner > 0
+            && unsafe { kill(owner, 0) } == 0
+            && stdin_tty().is_some_and(|own| own.as_os_str() == std::ffi::OsStr::new(tty))
+    }
+}
+
+#[cfg(unix)]
+fn stdin_tty() -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut buf = [0u8; 256];
+    // SAFETY: `buf` is writable for the length passed; on success it holds a
+    // NUL-terminated path.
+    if unsafe { ttyname_r(0, buf.as_mut_ptr().cast(), buf.len()) } != 0 {
+        return None;
+    }
+    let len = buf.iter().position(|&b| b == 0)?;
+    Some(std::ffi::OsStr::from_bytes(&buf[..len]).into())
+}
+
+/// `console` lists the processes attached to this console (Windows). The Esc
+/// shell is a direct child of `owner`; a window started from it is not.
+#[cfg(any(windows, test))]
+fn attached_to_esc_shell(
+    owner: u32,
+    console: &[u32],
+    parent_of: impl Fn(u32) -> Option<u32>,
+) -> bool {
+    console
+        .iter()
+        .any(|&pid| pid != owner && parent_of(pid) == Some(owner))
+}
+
+/// Whether `owner_name`, an executable file name, is the program running now.
+/// An inherited marker can name a process ID that has since been reused.
+#[cfg(any(windows, test))]
+fn same_program(owner_name: Option<&str>, exe: &Path) -> bool {
+    let Some(own) = exe.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    owner_name.is_some_and(|name| name.eq_ignore_ascii_case(own))
+}
+
 /// Output kept while the interface is visible. Past this, the reader waits and
 /// the child blocks instead of the buffer growing without limit.
 const MAX_PENDING: usize = 1024 * 1024;
@@ -277,11 +347,13 @@ impl Gate {
         self.ready.notify_all();
     }
 
-    fn push(&self, chunk: &[u8]) -> bool {
+    /// After `stop`, output is discarded rather than refused: the pty must be
+    /// drained or closing the pseudoconsole can block on older Windows.
+    fn push(&self, chunk: &[u8]) {
         let mut guard = lock(&self.inner);
         loop {
             if guard.stop {
-                return false;
+                return;
             }
             if guard.show {
                 let mut out = io::stdout();
@@ -289,11 +361,11 @@ impl Gate {
                 let _ = out.write_all(chunk);
                 let _ = out.flush();
                 guard.pending.clear();
-                return true;
+                return;
             }
             if guard.pending.len() < MAX_PENDING {
                 guard.pending.extend_from_slice(chunk);
-                return true;
+                return;
             }
             guard = wait(&self.ready, guard);
         }
@@ -313,15 +385,27 @@ fn wait<'a>(ready: &'a Condvar, guard: MutexGuard<'a, GateInner>) -> MutexGuard<
     ready.wait(guard).unwrap_or_else(|err| err.into_inner())
 }
 
+/// Keys kept while the shell starts; anything past this is dropped.
+const MAX_TYPED: usize = 4096;
+
+/// Longest escape sequence waited for before its bytes are passed through.
+/// Window titles carry a full path, so this is well above a CSI's length.
+const MAX_HELD: usize = 4096;
+
 /// Cursor tracking for the replies a terminal has to write back.
 ///
 /// ConPTY asks for the cursor position (`ESC [ 6 n`) while a console program
-/// is starting, and waits until the terminal answers. Leaving that unanswered
-/// stalls the shell before it prints a prompt.
+/// is starting and does not draw until the terminal answers; line editors
+/// ask before drawing a prompt. The shell starts in the background, before
+/// anyone knows where its output will land on the real screen, so cursor
+/// queries are held until [`TermReply::place`].
 struct TermReply {
     row: u16,
     col: u16,
     held: Vec<u8>,
+    placed: bool,
+    /// Tracked positions of cursor queries made before placement.
+    waiting: Vec<(u16, u16)>,
 }
 
 impl TermReply {
@@ -330,7 +414,27 @@ impl TermReply {
             row: 1,
             col: 1,
             held: Vec::new(),
+            placed: false,
+            waiting: Vec::new(),
         }
+    }
+
+    /// `row` is where the shell's first output appears on screen. Answers the
+    /// held queries with positions shifted there; tracked rows past the
+    /// bottom stay on the last row, as the screen scrolls.
+    fn place(&mut self, row: u16, rows: u16) -> Vec<u8> {
+        if self.placed {
+            return Vec::new();
+        }
+        self.placed = true;
+        let rows = rows.max(1);
+        let shift = row.max(1) - 1;
+        let on_screen = |row: u16| row.saturating_add(shift).min(rows);
+        self.row = on_screen(self.row);
+        self.waiting
+            .drain(..)
+            .flat_map(|(row, col)| format!("\x1b[{};{}R", on_screen(row), col).into_bytes())
+            .collect()
     }
 
     /// Bytes to show, and bytes to write back to the shell.
@@ -363,19 +467,34 @@ impl TermReply {
                 }
                 Escape::Cursor(len) => {
                     self.held.drain(..len);
-                    reply.extend(self.answer_cursor());
+                    if self.placed {
+                        reply.extend(self.answer_cursor());
+                    } else {
+                        self.waiting.push((self.row, self.col));
+                    }
                 }
-                Escape::Move { len, row, col } => {
-                    self.row = row.clamp(1, rows);
-                    self.col = col.clamp(1, cols.saturating_add(1));
+                Escape::Move(len, motion) => {
+                    self.apply(motion, cols, rows);
                     display.extend(self.held.drain(..len));
                 }
             }
         }
-        if self.held.len() > 128 {
+        if self.held.len() > MAX_HELD {
             display.append(&mut self.held);
         }
         (display, reply)
+    }
+
+    fn apply(&mut self, motion: Motion, cols: u16, rows: u16) {
+        let by = |at: u16, delta: i32| (i32::from(at) + delta).clamp(1, i32::from(u16::MAX)) as u16;
+        let (row, col) = match motion {
+            Motion::To { row, col } => (row, col),
+            Motion::Row(row) => (row, self.col),
+            Motion::Column(col) => (self.row, col),
+            Motion::By { down, right } => (by(self.row, down), by(self.col, right)),
+        };
+        self.row = row.clamp(1, rows);
+        self.col = col.clamp(1, cols);
     }
 
     fn advance(&mut self, bytes: &[u8], cols: u16, rows: u16) {
@@ -428,16 +547,33 @@ enum Escape {
     Answer(usize, AnswerKind),
     /// Cursor-position request. The answer depends on the tracked cursor.
     Cursor(usize),
-    Move {
-        len: usize,
-        row: u16,
-        col: u16,
-    },
+    Move(usize, Motion),
+}
+
+enum Motion {
+    To { row: u16, col: u16 },
+    Row(u16),
+    Column(u16),
+    By { down: i32, right: i32 },
 }
 
 fn classify_escape(buf: &[u8]) -> Escape {
     if buf.len() < 2 {
         return Escape::NeedMore;
+    }
+    if buf[1] == b']' {
+        // OSC (window title and the like) takes no columns. It ends with BEL
+        // or ESC \.
+        let end = buf.iter().enumerate().skip(2).find_map(|(i, &b)| match b {
+            0x07 => Some(i + 1),
+            0x1b if buf.get(i + 1) == Some(&b'\\') => Some(i + 2),
+            _ => None,
+        });
+        return match end {
+            Some(len) => Escape::Show(len),
+            None if buf.len() > MAX_HELD => Escape::Show(2),
+            None => Escape::NeedMore,
+        };
     }
     if buf[1] != b'[' {
         return Escape::Show(2);
@@ -459,9 +595,20 @@ fn classify_escape(buf: &[u8]) -> Escape {
         b'c' if params.is_empty() || params == b"0" => Escape::Answer(len, AnswerKind::Attributes),
         b'H' | b'f' => {
             let (row, col) = cup_position(params);
-            Escape::Move { len, row, col }
+            Escape::Move(len, Motion::To { row, col })
         }
-        b'A' | b'B' | b'C' | b'D' => Escape::Show(len),
+        b'A' | b'B' | b'C' | b'D' => {
+            let n = i32::from(number_or_one(params));
+            let (down, right) = match final_byte {
+                b'A' => (-n, 0),
+                b'B' => (n, 0),
+                b'C' => (0, n),
+                _ => (0, -n),
+            };
+            Escape::Move(len, Motion::By { down, right })
+        }
+        b'G' => Escape::Move(len, Motion::Column(number_or_one(params))),
+        b'd' => Escape::Move(len, Motion::Row(number_or_one(params))),
         _ => Escape::Show(len),
     }
 }
@@ -506,25 +653,25 @@ fn pump(
     alive: Arc<AtomicBool>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     screen: Arc<Screen>,
+    term: Arc<Mutex<TermReply>>,
 ) {
-    let mut term = TermReply::new();
     let mut buf = [0; 8192];
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                let (display, reply) = term.push(
-                    &buf[..n],
-                    screen.cols.load(Ordering::Relaxed),
-                    screen.rows.load(Ordering::Relaxed),
-                );
-                if !reply.is_empty() {
-                    let mut writer = writer.lock().unwrap_or_else(|err| err.into_inner());
-                    let _ = writer.write_all(&reply);
-                    let _ = writer.flush();
-                }
-                if !display.is_empty() && !gate.push(&display) {
-                    break;
+                let display = {
+                    let mut term = term.lock().unwrap_or_else(|err| err.into_inner());
+                    let (display, reply) = term.push(
+                        &buf[..n],
+                        screen.cols.load(Ordering::Relaxed),
+                        screen.rows.load(Ordering::Relaxed),
+                    );
+                    write_reply(&writer, &reply);
+                    display
+                };
+                if !display.is_empty() {
+                    gate.push(&display);
                 }
             }
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
@@ -534,20 +681,25 @@ fn pump(
     alive.store(false, Ordering::SeqCst);
 }
 
+fn write_reply(writer: &Mutex<Box<dyn Write + Send>>, reply: &[u8]) {
+    if reply.is_empty() {
+        return;
+    }
+    let mut writer = writer.lock().unwrap_or_else(|err| err.into_inner());
+    let _ = writer.write_all(reply);
+    let _ = writer.flush();
+}
+
 struct ShellSession {
-    // Dropped before the reader is joined: the reader blocks in `read` until
-    // the pty is closed.
     master: Option<Box<dyn MasterPty + Send>>,
     writer: Option<Arc<Mutex<Box<dyn Write + Send>>>>,
     child: Box<dyn Child + Send + Sync>,
     #[cfg(unix)]
     pid: Option<u32>,
-    #[cfg(windows)]
-    job: Option<win32::OwnedHandle>,
     gate: Arc<Gate>,
     alive: Arc<AtomicBool>,
     screen: Arc<Screen>,
-    reader: Option<JoinHandle<()>>,
+    term: Arc<Mutex<TermReply>>,
 }
 
 impl ShellSession {
@@ -570,14 +722,23 @@ impl ShellSession {
         if env::var_os("TERM").is_none() {
             cmd.env("TERM", "xterm-256color");
         }
+        #[cfg(windows)]
+        cmd.env(SHELL_ENV, std::process::id().to_string());
+        #[cfg(unix)]
+        if let Some(tty) = pair.master.tty_name() {
+            cmd.env(
+                SHELL_ENV,
+                format!("{}:{}", std::process::id(), tty.display()),
+            );
+        } else {
+            cmd.env_remove(SHELL_ENV);
+        }
         let mut child = pair
             .slave
             .spawn_command(cmd)
             .with_context(|| format!("Could not start {program}."))?;
         #[cfg(unix)]
         let pid = child.process_id();
-        #[cfg(windows)]
-        let job = child.process_id().and_then(win32::bind_kill_on_close);
         let reader = pair
             .master
             .try_clone_reader()
@@ -597,7 +758,11 @@ impl ShellSession {
         let alive_for_reader = Arc::clone(&alive);
         let writer_for_reader = Arc::clone(&writer);
         let screen_for_reader = Arc::clone(&screen);
-        let reader = match thread::Builder::new()
+        let term = Arc::new(Mutex::new(TermReply::new()));
+        let term_for_reader = Arc::clone(&term);
+        // Not joined on close: on Unix a background job can hold the pty open
+        // long after the shell is gone.
+        if let Err(err) = thread::Builder::new()
             .name("shell-output".into())
             .spawn(move || {
                 pump(
@@ -606,27 +771,24 @@ impl ShellSession {
                     alive_for_reader,
                     writer_for_reader,
                     screen_for_reader,
+                    term_for_reader,
                 )
-            }) {
-            Ok(reader) => reader,
-            Err(err) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(err).context("Could not read shell output.");
-            }
-        };
+            })
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(err).context("Could not read shell output.");
+        }
         Ok(Self {
             master: Some(pair.master),
             writer: Some(writer),
             child,
             #[cfg(unix)]
             pid,
-            #[cfg(windows)]
-            job,
             gate,
             alive,
             screen,
-            reader: Some(reader),
+            term,
         })
     }
 
@@ -638,6 +800,16 @@ impl ShellSession {
 
     fn set_show(&self, show: bool) {
         self.gate.set_show(show);
+    }
+
+    /// `row` is the screen row where the shell's output starts. Cursor
+    /// queries are answered from then on.
+    fn place(&self, row: u16) {
+        let mut term = self.term.lock().unwrap_or_else(|err| err.into_inner());
+        let reply = term.place(row, self.screen.rows.load(Ordering::Relaxed));
+        if let Some(writer) = &self.writer {
+            write_reply(writer, &reply);
+        }
     }
 
     fn resize(&self, cols: u16, rows: u16) -> Result<()> {
@@ -675,12 +847,9 @@ impl ShellSession {
         }
     }
 
+    /// On Windows, commands attached to the pseudoconsole end when it closes;
+    /// programs in their own window keep running.
     fn kill_tree(&mut self) {
-        #[cfg(windows)]
-        {
-            // Closing the job ends the shell and commands it started.
-            self.job.take();
-        }
         #[cfg(unix)]
         if let Some(pid) = self.pid.and_then(|pid| i32::try_from(pid).ok()) {
             if pid > 0 {
@@ -698,12 +867,8 @@ impl Drop for ShellSession {
     fn drop(&mut self) {
         self.gate.stop();
         self.kill_tree();
-        // The reader is blocked in `read` until the pty closes.
         self.writer.take();
         self.master.take();
-        if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
-        }
         let _ = self.child.wait();
     }
 }
@@ -711,6 +876,7 @@ impl Drop for ShellSession {
 #[cfg(unix)]
 unsafe extern "C" {
     fn kill(pid: i32, sig: i32) -> i32;
+    fn ttyname_r(fd: i32, buf: *mut std::ffi::c_char, len: usize) -> i32;
 }
 
 fn pty_size(cols: u16, rows: u16) -> PtySize {
@@ -746,12 +912,25 @@ impl PendingShell {
     }
 }
 
-/// The shell for one full-screen session. It stays running across Esc toggles
-/// so the next hide returns to the same prompt. `exit` in the shell ends it;
-/// the next hide starts another.
+/// The shell for one full-screen session. It is started in the background
+/// once the interface has settled, because a shell such as PowerShell can take
+/// a second or more to print its first prompt. It stays running across Esc
+/// toggles so the next hide returns to the same prompt. `exit` in the shell
+/// ends it and another is prepared.
 pub(super) struct ShellSlot {
     session: Option<ShellSession>,
     pending: Option<PendingShell>,
+    /// Keys typed after Esc while the shell is still starting.
+    typed: Vec<u8>,
+    /// Screen row where a new shell's output will start, when known before
+    /// it is shown. Lets it draw in the background without waiting for Esc.
+    origin: Option<u16>,
+    /// The current shell has not been shown yet.
+    unshown: bool,
+    /// Background starts are allowed. Cleared when one fails or the shell
+    /// quits on its own, so a broken shell is not restarted in a loop; the
+    /// next Esc tries again and reports the error.
+    preload: bool,
 }
 
 impl ShellSlot {
@@ -759,6 +938,10 @@ impl ShellSlot {
         Self {
             session: None,
             pending: None,
+            typed: Vec::new(),
+            origin: None,
+            unshown: false,
+            preload: true,
         }
     }
 
@@ -774,13 +957,29 @@ impl ShellSlot {
             }
         };
         self.pending.take();
+        let typed = std::mem::take(&mut self.typed);
         match result {
-            Ok(session) => {
+            Ok(mut session) => {
+                if let Some(row) = self.origin {
+                    session.place(row);
+                }
+                if !typed.is_empty() {
+                    let _ = session.send(&typed);
+                }
                 self.session = Some(session);
                 Some(Ok(()))
             }
-            Err(err) => Some(Err(err)),
+            Err(err) => {
+                self.preload = false;
+                Some(Err(err))
+            }
         }
+    }
+
+    /// `origin` comes from [`main_screen_origin`], read just before the
+    /// interface covers the main screen.
+    pub(super) fn set_origin(&mut self, origin: Option<u16>) {
+        self.origin = origin;
     }
 
     pub(super) fn is_ready(&mut self) -> bool {
@@ -806,18 +1005,46 @@ impl ShellSlot {
         self.session = None;
     }
 
+    /// Drops a shell that quit while it was in the background.
+    pub(super) fn discard(&mut self) {
+        self.session = None;
+        self.preload = false;
+    }
+
+    /// Starts a shell in the background unless one exists or an earlier
+    /// background start failed.
+    pub(super) fn preload(&mut self, cols: u16, rows: u16) {
+        if self.preload && self.start(cols, rows).is_err() {
+            self.preload = false;
+        }
+    }
+
     pub(super) fn start(&mut self, cols: u16, rows: u16) -> io::Result<()> {
         if self.session.is_some() || self.pending.is_some() {
             return Ok(());
         }
         self.pending = Some(PendingShell::spawn(cols, rows)?);
+        self.unshown = true;
+        self.preload = true;
         Ok(())
     }
 
-    pub(super) fn show(&self, show: bool) {
-        if let Some(session) = &self.session {
-            session.set_show(show);
+    pub(super) fn show(&mut self, show: bool) {
+        let Some(session) = &self.session else {
+            return;
+        };
+        if show && self.unshown {
+            // Raw mode does not move the cursor to column 0 on a bare line feed.
+            let mut out = io::stdout();
+            let _ = out.write_all(b"\r\n");
+            let _ = out.flush();
+            let row = ratatui::crossterm::cursor::position()
+                .map(|(_, row)| row.saturating_add(1))
+                .unwrap_or(1);
+            session.place(row);
+            self.unshown = false;
         }
+        session.set_show(show);
     }
 
     pub(super) fn resize(&self, cols: u16, rows: u16) {
@@ -826,13 +1053,33 @@ impl ShellSlot {
         }
     }
 
-    /// Forwards a key. Keys typed before the shell has started are ignored.
-    /// A write error means the shell is gone.
+    /// Forwards a key. Keys typed while the shell is starting are kept and
+    /// sent once it is ready. A write error means the shell is gone.
     pub(super) fn send(&mut self, bytes: &[u8]) -> io::Result<()> {
         let Some(session) = self.session.as_mut() else {
+            if self.pending.is_some() && self.typed.len() + bytes.len() <= MAX_TYPED {
+                self.typed.extend_from_slice(bytes);
+            }
             return Ok(());
         };
         session.send(bytes)
+    }
+}
+
+/// Screen row where a shell shown next would start, while the main screen is
+/// visible. Only on Windows, where reading the cursor is a console call; on
+/// Unix it is a round trip to the terminal, left to the first Esc.
+pub(super) fn main_screen_origin() -> Option<u16> {
+    #[cfg(windows)]
+    {
+        // The first show writes a line break before the shell's output.
+        ratatui::crossterm::cursor::position()
+            .ok()
+            .map(|(_, row)| row.saturating_add(2))
+    }
+    #[cfg(not(windows))]
+    {
+        None
     }
 }
 
@@ -857,10 +1104,6 @@ mod win32 {
 
     const TH32CS_SNAPPROCESS: u32 = 0x0000_0002;
     const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
-    const PROCESS_TERMINATE: u32 = 0x0001;
-    const PROCESS_SET_QUOTA: u32 = 0x0100;
-    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
-    const JOB_OBJECT_BASIC_LIMIT_INFORMATION: i32 = 2;
     const INVALID_HANDLE: *mut c_void = -1isize as *mut c_void;
 
     #[repr(C)]
@@ -877,20 +1120,7 @@ mod win32 {
         exe_file: [u16; 260],
     }
 
-    #[repr(C)]
-    struct JobBasicLimit {
-        per_process_user_time: i64,
-        per_job_user_time: i64,
-        limit_flags: u32,
-        minimum_working_set: usize,
-        maximum_working_set: usize,
-        active_process_limit: u32,
-        affinity: usize,
-        priority_class: u32,
-        scheduling_class: u32,
-    }
-
-    pub(super) struct OwnedHandle(*mut c_void);
+    struct OwnedHandle(*mut c_void);
 
     impl OwnedHandle {
         fn new(handle: *mut c_void) -> Option<Self> {
@@ -909,10 +1139,6 @@ mod win32 {
         }
     }
 
-    // SAFETY: the handle is owned and moved with the session. It is not used
-    // from two threads at the same time.
-    unsafe impl Send for OwnedHandle {}
-
     #[link(name = "kernel32")]
     extern "system" {
         fn GetCurrentProcessId() -> u32;
@@ -927,14 +1153,7 @@ mod win32 {
             size: *mut u32,
         ) -> i32;
         fn CloseHandle(handle: *mut c_void) -> i32;
-        fn CreateJobObjectW(attrs: *mut c_void, name: *const u16) -> *mut c_void;
-        fn SetInformationJobObject(
-            job: *mut c_void,
-            class: i32,
-            info: *const c_void,
-            length: u32,
-        ) -> i32;
-        fn AssignProcessToJobObject(job: *mut c_void, process: *mut c_void) -> i32;
+        fn GetConsoleProcessList(pids: *mut u32, count: u32) -> u32;
     }
 
     struct Proc {
@@ -959,31 +1178,34 @@ mod win32 {
         None
     }
 
-    /// Puts `pid` in a job that ends every process in it when the handle is
-    /// closed, so quitting StealthLingo also stops commands the shell started.
-    pub(super) fn bind_kill_on_close(pid: u32) -> Option<OwnedHandle> {
-        // SAFETY: the job information struct is zeroed plain data, and the
-        // process handle is only passed to AssignProcessToJobObject.
-        unsafe {
-            let job = OwnedHandle::new(CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()))?;
-            let mut info: JobBasicLimit = std::mem::zeroed();
-            info.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            if SetInformationJobObject(
-                job.0,
-                JOB_OBJECT_BASIC_LIMIT_INFORMATION,
-                (&raw const info).cast(),
-                std::mem::size_of::<JobBasicLimit>() as u32,
-            ) == 0
-            {
-                return None;
+    /// Whether a direct child of `owner` shares this process's console, which
+    /// is how the Esc shell of StealthLingo `owner` looks from inside it.
+    pub(super) fn console_belongs_to(owner: u32) -> bool {
+        let mut pids = vec![0u32; 64];
+        loop {
+            // SAFETY: `pids` is a writable buffer of the length passed.
+            let count =
+                unsafe { GetConsoleProcessList(pids.as_mut_ptr(), pids.len() as u32) } as usize;
+            if count == 0 {
+                return false;
             }
-            let process =
-                OwnedHandle::new(OpenProcess(PROCESS_TERMINATE | PROCESS_SET_QUOTA, 0, pid))?;
-            if AssignProcessToJobObject(job.0, process.0) == 0 {
-                return None;
+            if count <= pids.len() {
+                pids.truncate(count);
+                break;
             }
-            Some(job)
+            pids.resize(count, 0);
         }
+        let Some(table) = process_table() else {
+            return false;
+        };
+        let Ok(exe) = std::env::current_exe() else {
+            return false;
+        };
+        let owner_name = table.get(&owner).map(|proc| proc.name.as_str());
+        super::same_program(owner_name, &exe)
+            && super::attached_to_esc_shell(owner, &pids, |pid| {
+                table.get(&pid).map(|proc| proc.parent)
+            })
     }
 
     fn process_table() -> Option<HashMap<u32, Proc>> {
@@ -1030,6 +1252,11 @@ mod win32 {
     fn wide_string(buf: &[u16]) -> String {
         let end = buf.iter().position(|&unit| unit == 0).unwrap_or(buf.len());
         String::from_utf16_lossy(&buf[..end])
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_running(pid: u32) -> bool {
+        process_table().is_some_and(|table| table.contains_key(&pid))
     }
 
     #[cfg(test)]
@@ -1194,6 +1421,7 @@ mod tests {
     #[test]
     fn cursor_query_is_answered_and_not_shown() {
         let mut term = TermReply::new();
+        term.place(1, 24);
         let (display, reply) = term.push(b"ab\x1b[6n", 80, 24);
         assert_eq!(display, b"ab");
         assert_eq!(reply, b"\x1b[1;3R");
@@ -1207,6 +1435,114 @@ mod tests {
         let (colored, reply) = term.push(b"\x1b[31mx", 80, 24);
         assert_eq!(colored, b"\x1b[31mx");
         assert!(reply.is_empty());
+    }
+
+    #[test]
+    fn cursor_queries_wait_until_the_shell_is_placed_on_screen() {
+        let mut term = TermReply::new();
+        let (display, reply) = term.push(b"PS> \x1b[6n", 80, 24);
+        assert_eq!(display, b"PS> ");
+        assert!(reply.is_empty());
+        assert_eq!(term.place(10, 24), b"\x1b[10;5R");
+        let (_, reply) = term.push(b"x\x1b[6n", 80, 24);
+        assert_eq!(reply, b"\x1b[10;6R");
+        assert!(term.place(3, 24).is_empty());
+    }
+
+    #[test]
+    fn placing_near_the_bottom_accounts_for_scrolling() {
+        let mut term = TermReply::new();
+        term.push(b"a\r\nb\r\nc", 80, 24);
+        assert!(term.place(23, 24).is_empty());
+        let (_, reply) = term.push(b"\x1b[6n", 80, 24);
+        assert_eq!(reply, b"\x1b[24;2R");
+    }
+
+    #[test]
+    fn titles_take_no_columns() {
+        let mut term = TermReply::new();
+        term.place(1, 24);
+        let (display, reply) = term.push(b"\x1b]0;C:\\cmd.exe\x07ab\x1b[6n", 80, 24);
+        assert_eq!(display, b"\x1b]0;C:\\cmd.exe\x07ab");
+        assert_eq!(reply, b"\x1b[1;3R");
+
+        let (_, reply) = term.push(b"\x1b]2;title\x1b\\c\x1b[6n", 80, 24);
+        assert_eq!(reply, b"\x1b[1;4R");
+
+        let long = format!("\x1b]0;{}\x07d\x1b[6n", "x".repeat(300));
+        let (_, reply) = term.push(long.as_bytes(), 80, 24);
+        assert_eq!(reply, b"\x1b[1;5R");
+
+        let (split, none) = term.push(b"\x1b]0;par", 80, 24);
+        assert!(split.is_empty() && none.is_empty());
+        let (_, reply) = term.push(b"tial\x07e\x1b[6n", 80, 24);
+        assert_eq!(reply, b"\x1b[1;6R");
+    }
+
+    #[test]
+    fn relative_cursor_moves_are_tracked() {
+        let mut term = TermReply::new();
+        term.place(1, 24);
+        let (_, reply) = term.push(b"\x1b[5;10H\x1b[2A\x1b[3C\x1b[6n", 80, 24);
+        assert_eq!(reply, b"\x1b[3;13R");
+        let (_, reply) = term.push(b"\x1b[B\x1b[20D\x1b[6n", 80, 24);
+        assert_eq!(reply, b"\x1b[4;1R");
+        let (_, reply) = term.push(b"\x1b[7G\x1b[9d\x1b[6n", 80, 24);
+        assert_eq!(reply, b"\x1b[9;7R");
+        let (_, reply) = term.push(b"\x1b[99B\x1b[99C\x1b[6n", 80, 24);
+        assert_eq!(reply, b"\x1b[24;80R");
+    }
+
+    #[test]
+    fn only_the_same_program_owns_an_esc_shell() {
+        let exe = Path::new("C:\\tools\\stealthlingo.exe");
+        assert!(same_program(Some("STEALTHLINGO.EXE"), exe));
+        assert!(!same_program(Some("cmd.exe"), exe));
+        assert!(!same_program(None, exe));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn keys_typed_while_the_shell_starts_are_kept() {
+        let mut slot = ShellSlot::new();
+        slot.start(80, 24).unwrap();
+        slot.send(b"hostname\r").unwrap();
+        let start = Instant::now();
+        let started = loop {
+            if let Some(result) = slot.poll() {
+                break result;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(30),
+                "shell did not start"
+            );
+            thread::sleep(Duration::from_millis(20));
+        };
+        started.unwrap();
+        let shell = slot.session.as_ref().unwrap();
+        shell.place(1);
+        let host = env::var("COMPUTERNAME").unwrap().to_ascii_lowercase();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let found = loop {
+            let shown = String::from_utf8_lossy(&shell.gate.pending()).to_ascii_lowercase();
+            if shown.contains(&host) || Instant::now() > deadline {
+                break shown.contains(&host);
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
+        assert!(
+            found,
+            "output was {:?}",
+            String::from_utf8_lossy(&shell.gate.pending())
+        );
+    }
+
+    /// A session that answers cursor queries from the start, as one does
+    /// after its first Esc.
+    fn open_placed(program: &str, args: &[&str], cols: u16, rows: u16) -> Result<ShellSession> {
+        let shell = ShellSession::open(program, args, cols, rows)?;
+        shell.place(1);
+        Ok(shell)
     }
 
     fn output_contains(shell: &ShellSession, needle: &[u8]) -> bool {
@@ -1239,7 +1575,7 @@ mod tests {
         } else {
             ("/bin/sh", &["-c", "echo hello-from-shell"])
         };
-        let shell = ShellSession::open(program, args, 80, 24).unwrap();
+        let shell = open_placed(program, args, 80, 24).unwrap();
         assert!(
             wait_for(&shell, b"hello-from-shell", Duration::from_secs(5)),
             "output was {:?}",
@@ -1248,11 +1584,206 @@ mod tests {
     }
 
     #[test]
+    fn the_shell_is_marked_so_stealthlingo_can_tell_it_is_nested() {
+        let (program, args, expected): (&str, &[&str], String) = if cfg!(windows) {
+            (
+                "cmd.exe",
+                &["/c", "echo mark-%STEALTHLINGO_SHELL%-end"],
+                format!("mark-{}-end", std::process::id()),
+            )
+        } else {
+            (
+                "/bin/sh",
+                &["-c", "echo mark-$STEALTHLINGO_SHELL-end"],
+                format!("mark-{}:/dev/", std::process::id()),
+            )
+        };
+        let shell = open_placed(program, args, 80, 24).unwrap();
+        assert!(
+            wait_for(&shell, expected.as_bytes(), Duration::from_secs(5)),
+            "output was {:?}",
+            String::from_utf8_lossy(&shell.gate.pending())
+        );
+    }
+
+    #[test]
+    #[ignore = "started inside a pty by the_esc_shell_is_detected_from_inside_it"]
+    fn nested_probe() {
+        println!("nested-probe:{}", inside_esc_shell());
+    }
+
+    #[test]
+    fn the_esc_shell_is_detected_from_inside_it() {
+        let exe = std::env::current_exe().unwrap();
+        let shell = open_placed(
+            exe.to_str().unwrap(),
+            &[
+                "--exact",
+                "tui::shell::tests::nested_probe",
+                "--ignored",
+                "--nocapture",
+            ],
+            80,
+            24,
+        )
+        .unwrap();
+        assert!(
+            wait_for(&shell, b"nested-probe:true", Duration::from_secs(30)),
+            "output was {:?}",
+            String::from_utf8_lossy(&shell.gate.pending())
+        );
+    }
+
+    #[test]
+    fn only_the_esc_shell_console_counts_as_nested() {
+        // 1 is StealthLingo, 10 the Esc shell, 11 a window started from it
+        // (with 20 running there), 30 an unrelated terminal.
+        let parents = std::collections::HashMap::from([(10, 1), (11, 10), (20, 11), (30, 5)]);
+        let parent_of = |pid: u32| parents.get(&pid).copied();
+        assert!(attached_to_esc_shell(1, &[10, 12], parent_of));
+        assert!(!attached_to_esc_shell(1, &[11, 20], parent_of));
+        assert!(!attached_to_esc_shell(1, &[30], parent_of));
+    }
+
+    #[cfg(windows)]
+    fn wait_for_pid_file(path: &Path, timeout: Duration) -> Option<u32> {
+        let start = Instant::now();
+        while start.elapsed() < timeout {
+            if let Some(pid) = std::fs::read_to_string(path)
+                .ok()
+                .and_then(|text| text.trim().parse().ok())
+            {
+                return Some(pid);
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        None
+    }
+
+    #[cfg(windows)]
+    fn end_process(pid: u32) {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .output();
+    }
+
+    /// Writes a PowerShell script that records its PID and then waits.
+    #[cfg(windows)]
+    fn pid_script(dir: &Path) -> (std::path::PathBuf, String) {
+        let pid_file = dir.join("pid.txt");
+        let script = dir.join("child.ps1");
+        std::fs::write(
+            &script,
+            format!(
+                "$PID | Out-File -Encoding ascii '{}'\nStart-Sleep 60\n",
+                pid_file.display()
+            ),
+        )
+        .unwrap();
+        (pid_file, script.to_str().unwrap().to_string())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn programs_started_in_their_own_window_outlive_the_shell() {
+        let dir = tempfile::tempdir().unwrap();
+        let (pid_file, script) = pid_script(dir.path());
+        let shell = open_placed(
+            "cmd.exe",
+            &[
+                "/c",
+                "start",
+                "",
+                "/min",
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                &script,
+                "&",
+                "ping",
+                "-n",
+                "60",
+                "127.0.0.1",
+            ],
+            80,
+            24,
+        )
+        .unwrap();
+        let pid = wait_for_pid_file(&pid_file, Duration::from_secs(30))
+            .expect("the program in its own window did not start");
+        drop(shell);
+        thread::sleep(Duration::from_millis(500));
+        let alive = win32::is_running(pid);
+        end_process(pid);
+        assert!(
+            alive,
+            "a program in its own window was ended with the shell"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_command_running_in_the_shell_ends_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (pid_file, script) = pid_script(dir.path());
+        let shell = open_placed(
+            "cmd.exe",
+            &[
+                "/c",
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                &script,
+            ],
+            80,
+            24,
+        )
+        .unwrap();
+        let pid = wait_for_pid_file(&pid_file, Duration::from_secs(30))
+            .expect("the command did not start");
+        drop(shell);
+        let start = Instant::now();
+        while win32::is_running(pid) && start.elapsed() < Duration::from_secs(15) {
+            thread::sleep(Duration::from_millis(100));
+        }
+        let alive = win32::is_running(pid);
+        end_process(pid);
+        assert!(
+            !alive,
+            "a command in the shell kept running after it closed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn closing_does_not_wait_for_a_background_job_holding_the_pty() {
+        let shell = open_placed(
+            "/bin/sh",
+            &["-c", "set -m; sleep 20 & echo started; sleep 20"],
+            80,
+            24,
+        )
+        .unwrap();
+        assert!(wait_for(&shell, b"started", Duration::from_secs(5)));
+        let start = Instant::now();
+        drop(shell);
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "closing waited {:?} for the background job",
+            start.elapsed()
+        );
+    }
+
+    #[test]
     fn a_typed_command_reaches_the_shell() {
         let mut shell = if cfg!(windows) {
-            ShellSession::open("cmd.exe", &[], 80, 24).unwrap()
+            open_placed("cmd.exe", &[], 80, 24).unwrap()
         } else {
-            ShellSession::open("/bin/sh", &[], 80, 24).unwrap()
+            open_placed("/bin/sh", &[], 80, 24).unwrap()
         };
         shell.send(b"echo hello-typed\r").unwrap();
         assert!(
@@ -1265,8 +1796,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn powershell_accepts_a_typed_command() {
-        let mut shell =
-            ShellSession::open("powershell.exe", &["-NoLogo", "-NoProfile"], 80, 24).unwrap();
+        let mut shell = open_placed("powershell.exe", &["-NoLogo", "-NoProfile"], 80, 24).unwrap();
         shell.send(b"Write-Output hello-from-pwsh\r").unwrap();
         assert!(
             wait_for(&shell, b"hello-from-pwsh", Duration::from_secs(20)),

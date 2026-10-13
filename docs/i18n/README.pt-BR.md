@@ -56,6 +56,8 @@ stealthlingo --plain                   # prompts linha a linha
 
 Na tela inicial: `r` revisar · `a` praticar · `/` buscar · `w` lista · `t` estatísticas · `c` configurações · **Esc** ocultar · **Ctrl+C** sair (`q` só volta).
 
+No shell que o Esc abre, comandos como `lookup` e `add` funcionam normalmente. O app em tela cheia já está aberto, então iniciá-lo de novo ali só lembra você de apertar Esc.
+
 Modos de prática (`a`, ou a letra direto): `s` flashcards · `p` soletração · `m` letras faltando · `i` escuta · `x` misto · `e` refazer erros.
 
 ## Comandos
